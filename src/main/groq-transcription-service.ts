@@ -1,3 +1,5 @@
+import { buildGroqVocabularyPrompt } from './developer-vocabulary'
+
 const TRANSCRIPTIONS_ENDPOINT = 'https://api.groq.com/openai/v1/audio/transcriptions'
 const MODEL = 'whisper-large-v3-turbo'
 const REQUEST_TIMEOUT_MS = 60_000
@@ -5,6 +7,7 @@ const REQUEST_TIMEOUT_MS = 60_000
 interface TranscriptionInput {
   audio: Buffer
   mimeType: string
+  vocabulary?: readonly string[]
 }
 
 interface GroqTranscriptionResponse {
@@ -33,7 +36,7 @@ function errorMessage(response: GroqTranscriptionResponse, status: number): stri
 export class GroqTranscriptionService {
   constructor(private readonly apiKey: string | undefined) {}
 
-  async transcribe({ audio, mimeType }: TranscriptionInput): Promise<string> {
+  async transcribe({ audio, mimeType, vocabulary = [] }: TranscriptionInput): Promise<string> {
     if (!this.apiKey) {
       throw new Error('GROQ_API_KEY is missing. Add it to the local .env file and restart Voca.')
     }
@@ -46,6 +49,8 @@ export class GroqTranscriptionService {
     form.append('language', 'en')
     form.append('temperature', '0')
     form.append('response_format', 'json')
+    const vocabularyPrompt = buildGroqVocabularyPrompt(vocabulary)
+    if (vocabularyPrompt) form.append('prompt', vocabularyPrompt)
 
     const response = await fetch(TRANSCRIPTIONS_ENDPOINT, {
       method: 'POST',

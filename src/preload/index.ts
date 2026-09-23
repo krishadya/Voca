@@ -5,6 +5,10 @@ import type { AppState, RecordingErrorPayload, RecordingPayload } from '../share
 const api = {
   getAppState: (): Promise<AppState> => ipcRenderer.invoke(IPC.getAppState),
   toggleListening: (): Promise<void> => ipcRenderer.invoke(IPC.toggleListening),
+  addVocabularyTerm: (term: string): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.addVocabularyTerm, term),
+  removeVocabularyTerm: (term: string): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.removeVocabularyTerm, term),
   onListeningChanged: (callback: (state: AppState) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, state: AppState): void => callback(state)
     ipcRenderer.on(IPC.listeningChanged, listener)

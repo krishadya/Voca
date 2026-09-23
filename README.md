@@ -2,7 +2,7 @@
 
 Voca is a macOS-first desktop voice tool. Hold F8 to record, release it to transcribe the recording with Groq, and optionally transform and insert the text with Gemini.
 
-This milestone includes transcription, lightweight text processing, auto-paste, and session-scoped app/selection context for Dev Prompt mode. It does not include accounts, history, repository indexing, commands, or a database.
+This milestone includes transcription, lightweight text processing, auto-paste, session-scoped app/selection context, custom developer vocabulary, and local aggregate performance stats. It does not include accounts, history, repository indexing, commands, analytics, or a database.
 
 ## Current milestone
 
@@ -17,6 +17,8 @@ This milestone includes transcription, lightweight text processing, auto-paste, 
 - Optional Gemini processing using `gemini-3.5-flash-lite`
 - Raw, Clean, and Dev Prompt modes selected from the menu bar
 - Frontmost-app and selected-text context in Dev Prompt mode
+- Persistent developer vocabulary hints for Groq and Gemini
+- Local aggregate timing and word-count stats
 - Optional automatic insertion into the currently focused macOS text field
 - Non-focusable overlay with Listening, Transcribing, Processing, result, and failure states
 
@@ -44,6 +46,18 @@ Choose **Mode** from the Voca menu-bar menu:
 - **Dev Prompt** turns spoken developer intent into a concise coding-agent prompt without adding requirements. It can use the app and selected text captured when listening starts.
 
 The selected mode is saved in Voca's local Electron user-data directory and restored at the next launch.
+
+## Developer vocabulary
+
+Open **Settings…** from the menu bar and add up to 50 technology, API, or project terms under **Developer Vocabulary**. Terms are stored in Voca's local `settings.json`, preserve the casing you enter, and can be removed at any time.
+
+Voca passes a concise subset of the terms to Groq's supported transcription `prompt` parameter to improve recognition of unfamiliar spelling. The full list is passed to Gemini in Clean and Dev Prompt modes as reference-only spelling context. Both prompts explicitly say to use a term only when the spoken input actually refers to it.
+
+## Performance stats
+
+Each successful dictation measures recording duration, Groq transcription latency, Gemini processing latency, total time from F8 release to final output, and final word count. Raw mode reports Gemini processing as not applicable.
+
+The Settings **Stats** section shows successful dictations, total words, and average transcription, Gemini, and total latency. Only cumulative counts and timing totals are persisted in `settings.json`; per-recording metrics appear in development logs but transcript content is never added to metrics. Voca does not send metrics anywhere.
 
 ## Dev Prompt context
 
@@ -106,3 +120,5 @@ Voca continues to work without Accessibility/Input Monitoring access: F8 switche
 - Selection context is limited to 8,000 characters and only Electron-readable clipboard formats can be preserved and restored.
 - Secure/password fields and applications that block synthetic copy events provide no selection context; recording and processing continue normally.
 - Frontmost-app metadata is captured once when recording starts and is not updated if the user changes apps during processing.
+- Groq limits transcription prompts to 224 tokens, so Voca bounds its spelling hint; unusually large vocabulary lists may not fit entirely in the Groq hint. Gemini still receives the full saved list.
+- Average Gemini latency includes only successful Clean and Dev Prompt requests. Raw dictations are excluded from that average.

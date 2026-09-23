@@ -9,6 +9,14 @@ const initialState: AppState = {
   microphoneStatus: 'unknown',
   processingMode: 'clean',
   autoPaste: true,
+  developerVocabulary: [],
+  stats: {
+    totalSuccessfulDictations: 0,
+    totalWordsGenerated: 0,
+    averageTranscriptionLatencyMs: null,
+    averageProcessingLatencyMs: null,
+    averageTotalLatencyMs: null
+  },
   recordingSessionId: 0,
   overlayPhase: 'hidden',
   overlayText: ''
@@ -83,12 +91,28 @@ function Overlay({ state }: { state: AppState }): React.JSX.Element {
 }
 
 function Settings({ state }: { state: AppState }): React.JSX.Element {
+  const [vocabularyTerm, setVocabularyTerm] = useState('')
   const permissionLabel =
     state.microphoneStatus === 'granted'
       ? 'Microphone ready'
       : state.microphoneStatus === 'not-determined'
         ? 'Microphone permission will be requested on first use'
         : `Microphone: ${state.microphoneStatus}`
+
+  const formatLatency = (milliseconds: number | null): string => {
+    if (milliseconds === null) return '—'
+    return milliseconds < 1_000
+      ? `${Math.round(milliseconds)} ms`
+      : `${(milliseconds / 1_000).toFixed(2)} s`
+  }
+
+  const addVocabularyTerm = async (): Promise<void> => {
+    const term = vocabularyTerm.trim()
+    if (!term) return
+
+    const added = await window.voca.addVocabularyTerm(term)
+    if (added) setVocabularyTerm('')
+  }
 
   return (
     <main className="settings-shell">
@@ -149,6 +173,93 @@ function Settings({ state }: { state: AppState }): React.JSX.Element {
           <p className="permission-state">{permissionLabel}</p>
           <p>Audio is sent to Groq after recording</p>
         </article>
+      </section>
+
+      <section className="settings-section" aria-labelledby="vocabulary-heading">
+        <div className="section-heading-row">
+          <div>
+            <h2 id="vocabulary-heading">Developer Vocabulary</h2>
+            <p>Help Voca preserve the spelling of project and technology names.</p>
+          </div>
+          <span>{state.developerVocabulary.length}/50</span>
+        </div>
+
+        <form
+          className="vocabulary-form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void addVocabularyTerm()
+          }}
+        >
+          <label className="visually-hidden" htmlFor="vocabulary-term">
+            Developer vocabulary term
+          </label>
+          <input
+            id="vocabulary-term"
+            value={vocabularyTerm}
+            onChange={(event) => setVocabularyTerm(event.target.value)}
+            placeholder="e.g. useEffect or Supabase"
+            maxLength={64}
+            disabled={state.developerVocabulary.length >= 50}
+          />
+          <button
+            type="submit"
+            disabled={!vocabularyTerm.trim() || state.developerVocabulary.length >= 50}
+          >
+            Add
+          </button>
+        </form>
+
+        {state.developerVocabulary.length > 0 ? (
+          <ul className="vocabulary-list" aria-label="Saved developer vocabulary">
+            {state.developerVocabulary.map((term) => (
+              <li key={term.toLocaleLowerCase('en-US')}>
+                <span>{term}</span>
+                <button
+                  type="button"
+                  onClick={() => void window.voca.removeVocabularyTerm(term)}
+                  aria-label={`Remove ${term}`}
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="empty-state">No custom terms yet.</p>
+        )}
+      </section>
+
+      <section className="settings-section" aria-labelledby="stats-heading">
+        <div className="section-heading-row">
+          <div>
+            <h2 id="stats-heading">Stats</h2>
+            <p>Aggregate performance stored only on this Mac.</p>
+          </div>
+        </div>
+
+        <div className="stats-grid">
+          <article>
+            <strong>{state.stats.totalSuccessfulDictations.toLocaleString()}</strong>
+            <span>Dictations</span>
+          </article>
+          <article>
+            <strong>{state.stats.totalWordsGenerated.toLocaleString()}</strong>
+            <span>Words</span>
+          </article>
+          <article>
+            <strong>{formatLatency(state.stats.averageTranscriptionLatencyMs)}</strong>
+            <span>Avg. transcription</span>
+          </article>
+          <article>
+            <strong>{formatLatency(state.stats.averageProcessingLatencyMs)}</strong>
+            <span>Avg. Gemini</span>
+          </article>
+          <article>
+            <strong>{formatLatency(state.stats.averageTotalLatencyMs)}</strong>
+            <span>Avg. total</span>
+          </article>
+        </div>
       </section>
 
       <footer>

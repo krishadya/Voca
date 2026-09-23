@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import { performance } from 'node:perf_hooks'
 import { config as loadEnvironment } from 'dotenv'
 import {
   app,
@@ -14,15 +15,27 @@ import {
 import { HotkeyService } from './hotkey-service'
 import { GroqTranscriptionService } from './groq-transcription-service'
 import { GeminiProcessingService } from './gemini-processing-service'
-import type { DeveloperContext } from './gemini-processing-service'
+import type { GeminiProcessingContext } from './gemini-processing-service'
 import { ActiveAppService } from './active-app-service'
 import { SelectedTextService } from './selected-text-service'
+import {
+  MAX_VOCABULARY_TERMS,
+  normalizeVocabularyTerm
+} from './developer-vocabulary'
+import {
+  addRecordingMetrics,
+  countWords,
+  EMPTY_AGGREGATE_METRICS,
+  logRecordingMetrics,
+  summarizeMetrics
+} from './performance-metrics'
 import { SettingsStore } from './settings-store'
 import { TextInsertionService } from './text-insertion-service'
 import { createTrayImage } from './tray-icon'
 import { IPC } from '../shared/ipc'
 import type {
   AppState,
+  AggregateMetrics,
   HotkeyMode,
   OverlayPhase,
   ProcessingMode,
@@ -60,11 +73,16 @@ let hotkeyMessage = 'Starting keyboard shortcut…'
 let microphoneStatus = 'unknown'
 let processingMode: ProcessingMode = 'clean'
 let autoPaste = true
+let developerVocabulary: string[] = []
+let aggregateMetrics: AggregateMetrics = { ...EMPTY_AGGREGATE_METRICS }
 let recordingProcessingMode: ProcessingMode = 'clean'
 let recordingAutoPaste = true
+let recordingVocabulary: string[] = []
 let recordingHasExternalTarget = true
 let recordingSessionId = 0
-let recordingContextPromise: Promise<DeveloperContext> = Promise.resolve({})
+let recordingContextPromise: Promise<GeminiProcessingContext> = Promise.resolve({})
+let recordingReleasedAtMs = 0
+let lastMetricsSessionId = 0
 let overlayPhase: OverlayPhase = 'hidden'
 let overlayText = ''
 let recordingDeliveryTimer: ReturnType<typeof setTimeout> | null = null
@@ -84,9 +102,9 @@ function loadRenderer(window: BrowserWindow, route: 'settings' | 'overlay'): voi
 function createSettingsWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 480,
-    height: 520,
+    height: 720,
     minWidth: 420,
-    minHeight: 460,
+    minHeight: 560,
     show: false,
     title: 'Voca Settings',
     backgroundColor: '#111114',
@@ -163,6 +181,8 @@ function currentState(): AppState {
     microphoneStatus,
     processingMode,
     autoPaste,
+    developerVocabulary: [...developerVocabulary],
+    stats: summarizeMetrics(aggregateMetrics),
     recordingSessionId,
     overlayPhase,
     overlayText
@@ -265,8 +285,38 @@ function setAutoPaste(enabled: boolean): void {
   broadcastState()
 }
 
+function addVocabularyTerm(value: string): boolean {
+  const term = normalizeVocabularyTerm(value)
+  if (!term || developerVocabulary.length >= MAX_VOCABULARY_TERMS) return false
+  if (
+    developerVocabulary.some(
+      (existing) => existing.toLocaleLowerCase('en-US') === term.toLocaleLowerCase('en-US')
+    )
+  ) {
+    return false
+  }
+
+  developerVocabulary = [...developerVocabulary, term]
+  saveSettings()
+  broadcastState()
+  return true
+}
+
+function removeVocabularyTerm(value: string): boolean {
+  const comparisonKey = normalizeVocabularyTerm(value).toLocaleLowerCase('en-US')
+  const nextVocabulary = developerVocabulary.filter(
+    (term) => term.toLocaleLowerCase('en-US') !== comparisonKey
+  )
+  if (!comparisonKey || nextVocabulary.length === developerVocabulary.length) return false
+
+  developerVocabulary = nextVocabulary
+  saveSettings()
+  broadcastState()
+  return true
+}
+
 function saveSettings(): void {
-  settingsStore?.save({ processingMode, autoPaste })
+  settingsStore?.save({ processingMode, autoPaste, developerVocabulary, aggregateMetrics })
 }
 
 function clearRecordingDeliveryTimer(): void {
@@ -330,7 +380,7 @@ function showOperationFailure(
   scheduleOverlayHide(sessionId, ERROR_DISPLAY_MS)
 }
 
-async function captureRecordingContext(): Promise<DeveloperContext> {
+async function captureRecordingContext(): Promise<GeminiProcessingContext> {
   const activeApplication = await activeAppService.capture()
   console.info(
     `[context] app: ${
@@ -365,11 +415,14 @@ function setListening(next: boolean, source: string): void {
     recordingSessionId += 1
     recordingProcessingMode = processingMode
     recordingAutoPaste = autoPaste
+    recordingVocabulary = [...developerVocabulary]
     recordingHasExternalTarget = BrowserWindow.getFocusedWindow() === null
+    recordingReleasedAtMs = 0
     recordingContextPromise = captureRecordingContext()
     setOverlay('listening')
   } else {
     const stoppedSessionId = recordingSessionId
+    recordingReleasedAtMs = performance.now()
     setOverlay('transcribing')
     clearRecordingDeliveryTimer()
     recordingDeliveryTimer = setTimeout(() => {
@@ -457,6 +510,7 @@ async function transcribeRecording(payload: RecordingPayload): Promise<void> {
 
   clearRecordingDeliveryTimer()
   const contextPromise = recordingContextPromise
+  const releaseStartedAtMs = recordingReleasedAtMs || performance.now()
   const audio = Buffer.from(payload.audioData)
 
   if (audio.byteLength === 0) {
@@ -478,29 +532,39 @@ async function transcribeRecording(payload: RecordingPayload): Promise<void> {
   setOverlay('transcribing')
 
   try {
+    const transcriptionStartedAtMs = performance.now()
     const rawTranscript = await transcriptionService.transcribe({
       audio,
-      mimeType: payload.mimeType
+      mimeType: payload.mimeType,
+      vocabulary: recordingVocabulary
     })
+    const transcriptionLatencyMs = performance.now() - transcriptionStartedAtMs
 
     if (payload.sessionId !== recordingSessionId || listening) return
 
     console.info(`[transcription:raw] ${rawTranscript}`)
 
     let finalOutput = rawTranscript
+    let processingLatencyMs = 0
+    let usedGemini = false
     if (recordingProcessingMode !== 'raw') {
       setOverlay('processing')
       try {
-        const developerContext =
-          recordingProcessingMode === 'dev-prompt' ? await contextPromise : undefined
+        const processingContext: GeminiProcessingContext =
+          recordingProcessingMode === 'dev-prompt'
+            ? { ...(await contextPromise), vocabulary: recordingVocabulary }
+            : { vocabulary: recordingVocabulary }
 
         if (payload.sessionId !== recordingSessionId || listening) return
 
+        const processingStartedAtMs = performance.now()
         finalOutput = await geminiProcessingService.process(
           rawTranscript,
           recordingProcessingMode,
-          developerContext
+          processingContext
         )
+        processingLatencyMs = performance.now() - processingStartedAtMs
+        usedGemini = true
       } catch (error) {
         showOperationFailure(payload.sessionId, error, 'Processing failed', 'processing')
         return
@@ -513,6 +577,22 @@ async function transcribeRecording(payload: RecordingPayload): Promise<void> {
     await contextPromise
 
     if (payload.sessionId !== recordingSessionId || listening) return
+
+    const recordingMetrics = {
+      recordingDurationMs: payload.durationMs,
+      transcriptionLatencyMs,
+      processingLatencyMs,
+      totalLatencyMs: performance.now() - releaseStartedAtMs,
+      wordCount: countWords(finalOutput),
+      usedGemini
+    }
+
+    if (lastMetricsSessionId !== payload.sessionId) {
+      lastMetricsSessionId = payload.sessionId
+      aggregateMetrics = addRecordingMetrics(aggregateMetrics, recordingMetrics)
+      saveSettings()
+      if (!app.isPackaged) logRecordingMetrics(recordingMetrics)
+    }
 
     console.info(`[output:${recordingProcessingMode}] ${finalOutput}`)
     setOverlay('transcript', finalOutput)
@@ -552,6 +632,14 @@ async function transcribeRecording(payload: RecordingPayload): Promise<void> {
 function installIpcHandlers(): void {
   ipcMain.handle(IPC.getAppState, () => currentState())
   ipcMain.handle(IPC.toggleListening, () => toggleListening('settings'))
+  ipcMain.handle(IPC.addVocabularyTerm, (event, term: unknown) => {
+    if (event.sender.id !== settingsWindow?.webContents.id || typeof term !== 'string') return false
+    return addVocabularyTerm(term)
+  })
+  ipcMain.handle(IPC.removeVocabularyTerm, (event, term: unknown) => {
+    if (event.sender.id !== settingsWindow?.webContents.id || typeof term !== 'string') return false
+    return removeVocabularyTerm(term)
+  })
 
   ipcMain.handle(IPC.transcribeRecording, async (event, payload: unknown) => {
     if (event.sender.id !== settingsWindow?.webContents.id) {
@@ -599,8 +687,11 @@ app.whenReady().then(() => {
   const savedSettings = settingsStore.load()
   processingMode = savedSettings.processingMode
   autoPaste = savedSettings.autoPaste
+  developerVocabulary = savedSettings.developerVocabulary
+  aggregateMetrics = savedSettings.aggregateMetrics
   console.info(`[mode] ${processingMode}`)
   console.info(`[auto-paste] ${autoPaste ? 'on' : 'off'}`)
+  console.info(`[vocabulary] ${developerVocabulary.length} terms loaded`)
 
   settingsWindow = createSettingsWindow()
   overlayWindow = createOverlayWindow()
