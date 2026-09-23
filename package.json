@@ -1,0 +1,58 @@
+{
+  "name": "voca",
+  "version": "0.1.0",
+  "description": "A macOS-first push-to-talk desktop voice tool.",
+  "main": "./out/main/index.js",
+  "author": "Voca",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "build": "npm run typecheck && electron-vite build",
+    "preview": "electron-vite preview",
+    "package:mac": "npm run build && electron-builder --mac"
+  },
+  "build": {
+    "appId": "com.voca.desktop",
+    "productName": "Voca",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/uiohook-napi/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "extendInfo": {
+        "LSUIElement": true,
+        "NSMicrophoneUsageDescription": "Voca needs microphone access while you are holding the listening shortcut."
+      }
+    }
+  },
+  "dependencies": {
+    "dotenv": "^18.0.3",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "uiohook-napi": "^1.5.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^44.4.4",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.6"
+  }
+}
