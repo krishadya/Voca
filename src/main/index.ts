@@ -14,6 +14,9 @@ import {
 import { HotkeyService } from './hotkey-service'
 import { GroqTranscriptionService } from './groq-transcription-service'
 import { GeminiProcessingService } from './gemini-processing-service'
+import type { DeveloperContext } from './gemini-processing-service'
+import { ActiveAppService } from './active-app-service'
+import { SelectedTextService } from './selected-text-service'
 import { SettingsStore } from './settings-store'
 import { TextInsertionService } from './text-insertion-service'
 import { createTrayImage } from './tray-icon'
@@ -41,6 +44,8 @@ const ERROR_DISPLAY_MS = 2_200
 const transcriptionService = new GroqTranscriptionService(process.env.GROQ_API_KEY)
 const geminiProcessingService = new GeminiProcessingService(process.env.GEMINI_API_KEY)
 const textInsertionService = new TextInsertionService()
+const activeAppService = new ActiveAppService()
+const selectedTextService = new SelectedTextService()
 
 let settingsWindow: BrowserWindow | null = null
 let overlayWindow: BrowserWindow | null = null
@@ -59,6 +64,7 @@ let recordingProcessingMode: ProcessingMode = 'clean'
 let recordingAutoPaste = true
 let recordingHasExternalTarget = true
 let recordingSessionId = 0
+let recordingContextPromise: Promise<DeveloperContext> = Promise.resolve({})
 let overlayPhase: OverlayPhase = 'hidden'
 let overlayText = ''
 let recordingDeliveryTimer: ReturnType<typeof setTimeout> | null = null
@@ -324,6 +330,29 @@ function showOperationFailure(
   scheduleOverlayHide(sessionId, ERROR_DISPLAY_MS)
 }
 
+async function captureRecordingContext(): Promise<DeveloperContext> {
+  const activeApplication = await activeAppService.capture()
+  console.info(
+    `[context] app: ${
+      activeApplication
+        ? `${activeApplication.name}${
+            activeApplication.bundleIdentifier
+              ? ` (${activeApplication.bundleIdentifier})`
+              : ''
+          }`
+        : 'unavailable'
+    }`
+  )
+
+  const selectedText = await selectedTextService.capture()
+  console.info(`[context] selected text: ${selectedText?.length ?? 0} chars`)
+
+  return {
+    ...(activeApplication ? { activeApplication } : {}),
+    ...(selectedText ? { selectedText } : {})
+  }
+}
+
 function setListening(next: boolean, source: string): void {
   if (listening === next) return
 
@@ -337,6 +366,7 @@ function setListening(next: boolean, source: string): void {
     recordingProcessingMode = processingMode
     recordingAutoPaste = autoPaste
     recordingHasExternalTarget = BrowserWindow.getFocusedWindow() === null
+    recordingContextPromise = captureRecordingContext()
     setOverlay('listening')
   } else {
     const stoppedSessionId = recordingSessionId
@@ -426,6 +456,7 @@ async function transcribeRecording(payload: RecordingPayload): Promise<void> {
   }
 
   clearRecordingDeliveryTimer()
+  const contextPromise = recordingContextPromise
   const audio = Buffer.from(payload.audioData)
 
   if (audio.byteLength === 0) {
@@ -460,12 +491,26 @@ async function transcribeRecording(payload: RecordingPayload): Promise<void> {
     if (recordingProcessingMode !== 'raw') {
       setOverlay('processing')
       try {
-        finalOutput = await geminiProcessingService.process(rawTranscript, recordingProcessingMode)
+        const developerContext =
+          recordingProcessingMode === 'dev-prompt' ? await contextPromise : undefined
+
+        if (payload.sessionId !== recordingSessionId || listening) return
+
+        finalOutput = await geminiProcessingService.process(
+          rawTranscript,
+          recordingProcessingMode,
+          developerContext
+        )
       } catch (error) {
         showOperationFailure(payload.sessionId, error, 'Processing failed', 'processing')
         return
       }
     }
+
+    if (payload.sessionId !== recordingSessionId || listening) return
+
+    // Ensure selection capture has restored the clipboard before insertion.
+    await contextPromise
 
     if (payload.sessionId !== recordingSessionId || listening) return
 

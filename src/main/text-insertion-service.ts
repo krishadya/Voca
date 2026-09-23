@@ -1,9 +1,10 @@
-import { clipboard, ClipboardItem, systemPreferences } from 'electron'
+import { clipboard, systemPreferences } from 'electron'
 import { uIOhook, UiohookKey } from 'uiohook-napi'
+import { restoreClipboard, snapshotClipboard } from './clipboard-utils'
+import type { ClipboardSnapshot } from './clipboard-utils'
 
 const CLIPBOARD_SETTLE_MS = 100
 const CLIPBOARD_RESTORE_MS = 900
-const BOOKMARK_MIME_TYPE = 'electron application/bookmark'
 
 export interface TextInsertionResult {
   status: 'pasted' | 'copied' | 'copy-failed'
@@ -13,30 +14,6 @@ export interface TextInsertionResult {
 
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
-}
-
-async function snapshotClipboard(): Promise<ClipboardItem[]> {
-  const currentItems = await clipboard.read()
-
-  return Promise.all(
-    currentItems.map(async (item) => {
-      const materialized: Record<
-        string,
-        string | Electron.ClipboardBookmark | Blob | Promise<Blob | string>
-      > = {}
-
-      await Promise.all(
-        item.types.map(async (type) => {
-          materialized[type] =
-            type === BOOKMARK_MIME_TYPE
-              ? await item.getType(BOOKMARK_MIME_TYPE)
-              : await item.getType(type)
-        })
-      )
-
-      return new ClipboardItem(materialized)
-    })
-  )
 }
 
 async function copyForManualPaste(text: string, error?: unknown): Promise<TextInsertionResult> {
@@ -67,7 +44,7 @@ export class TextInsertionService {
       return copyForManualPaste(text, new Error('Accessibility permission is not enabled'))
     }
 
-    let clipboardSnapshot: ClipboardItem[] | null = null
+    let clipboardSnapshot: ClipboardSnapshot | null = null
     try {
       clipboardSnapshot = await snapshotClipboard()
     } catch (error) {
@@ -95,11 +72,7 @@ export class TextInsertionService {
         return { status: 'pasted', clipboardRestored: false }
       }
 
-      if (clipboardSnapshot.length > 0) {
-        await clipboard.write(clipboardSnapshot)
-      } else {
-        clipboard.clear()
-      }
+      await restoreClipboard(clipboardSnapshot)
       return { status: 'pasted', clipboardRestored: true }
     } catch (error) {
       console.warn('[insertion] Paste succeeded, but clipboard restoration failed:', error)

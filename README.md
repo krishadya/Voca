@@ -1,8 +1,8 @@
 # Voca
 
-Voca is a macOS-first desktop voice tool. Hold F8 to record, release it to transcribe the recording with Groq, and optionally transform the text with Gemini.
+Voca is a macOS-first desktop voice tool. Hold F8 to record, release it to transcribe the recording with Groq, and optionally transform and insert the text with Gemini.
 
-This milestone includes transcription and lightweight text processing. It does not include auto-paste, accounts, history, repository context, commands, or a database.
+This milestone includes transcription, lightweight text processing, auto-paste, and session-scoped app/selection context for Dev Prompt mode. It does not include accounts, history, repository indexing, commands, or a database.
 
 ## Current milestone
 
@@ -16,6 +16,7 @@ This milestone includes transcription and lightweight text processing. It does n
 - Groq speech-to-text using `whisper-large-v3-turbo`
 - Optional Gemini processing using `gemini-3.5-flash-lite`
 - Raw, Clean, and Dev Prompt modes selected from the menu bar
+- Frontmost-app and selected-text context in Dev Prompt mode
 - Optional automatic insertion into the currently focused macOS text field
 - Non-focusable overlay with Listening, Transcribing, Processing, result, and failure states
 
@@ -40,9 +41,15 @@ Choose **Mode** from the Voca menu-bar menu:
 
 - **Raw** displays Groq's transcript unchanged and does not call Gemini.
 - **Clean** removes speech artifacts and fixes basic writing while preserving meaning. This is the default.
-- **Dev Prompt** turns spoken developer intent into a concise coding-agent prompt without adding requirements.
+- **Dev Prompt** turns spoken developer intent into a concise coding-agent prompt without adding requirements. It can use the app and selected text captured when listening starts.
 
 The selected mode is saved in Voca's local Electron user-data directory and restored at the next launch.
+
+## Dev Prompt context
+
+At the start of each recording, Voca takes a one-time snapshot of the frontmost app's display name and bundle identifier. It also attempts to read selected text by snapshotting the clipboard, issuing Command+C without changing focus, reading up to 8,000 characters, and immediately restoring the clipboard. Raw and Clean never send this context to Gemini.
+
+Selected text is treated as supporting context; the spoken request remains the primary instruction. Voca does not inspect the current repository, run commands, or continuously monitor applications.
 
 ## Auto Paste
 
@@ -68,7 +75,7 @@ npm run package:mac # Create unsigned macOS distributables in release/
 Voca requests only the permissions needed for this milestone:
 
 1. **Microphone** — requested the first time listening starts. If denied, enable Voca (or Electron while running in development) in **System Settings → Privacy & Security → Microphone**.
-2. **Accessibility** — requested for reliable global key-down/key-up monitoring. Enable Voca (or Electron while running in development) in **System Settings → Privacy & Security → Accessibility**, then restart the app.
+2. **Accessibility** — requested for reliable global key-down/key-up monitoring, selection capture, and auto-paste. Enable Voca (or Electron while running in development) in **System Settings → Privacy & Security → Accessibility**, then restart the app.
 
 Depending on the macOS version and how the app is launched, macOS may place the native keyboard hook under **Input Monitoring** instead. If F8 does not respond after enabling Accessibility, also enable Voca/Electron in **System Settings → Privacy & Security → Input Monitoring** and restart.
 
@@ -95,3 +102,7 @@ Voca continues to work without Accessibility/Input Monitoring access: F8 switche
 - Clipboard restoration is skipped if the clipboard changes during the paste delay, preventing Voca from overwriting a newer user copy operation.
 - Voca cannot reliably detect a target application that accepts Command+V but ignores the paste. In that rare case the operation may still be reported as pasted.
 - Because Voca never takes focus, insertion normally returns to the original field. If the user deliberately switches apps or moves focus while processing, Command+V goes to the newly focused field.
+- Selected-text capture uses a brief Command+C clipboard fallback. Apps that copy a whole line when nothing is selected may provide that line as context.
+- Selection context is limited to 8,000 characters and only Electron-readable clipboard formats can be preserved and restored.
+- Secure/password fields and applications that block synthetic copy events provide no selection context; recording and processing continue normally.
+- Frontmost-app metadata is captured once when recording starts and is not updated if the user changes apps during processing.
