@@ -49,6 +49,7 @@ import type {
   AppState,
   AggregateMetrics,
   HotkeyMode,
+  OverlayStyle,
   OverlayPhase,
   ProcessingMode,
   RecordingErrorPayload,
@@ -59,10 +60,12 @@ import type {
 
 loadEnvironment({ path: join(process.cwd(), '.env'), quiet: true })
 
-const COMPACT_OVERLAY_WIDTH = 390
-const COMPACT_OVERLAY_HEIGHT = 118
-const RESULT_OVERLAY_WIDTH = 520
-const RESULT_OVERLAY_HEIGHT = 200
+const COMPACT_OVERLAY_WIDTH = 410
+const COMPACT_OVERLAY_HEIGHT = 92
+const RESULT_OVERLAY_WIDTH = 440
+const RESULT_OVERLAY_HEIGHT = 126
+const MINIMAL_OVERLAY_WIDTH = 128
+const MINIMAL_OVERLAY_HEIGHT = 52
 const OVERLAY_BOTTOM_GAP = 72
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024
 const RECORDING_DELIVERY_TIMEOUT_MS = 5_000
@@ -96,6 +99,7 @@ let accessibilityGranted = false
 let onboardingComplete = false
 let processingMode: ProcessingMode = 'clean'
 let autoPaste = true
+let overlayStyle: OverlayStyle = 'detailed'
 let developerVocabulary: string[] = []
 let aggregateMetrics: AggregateMetrics = { ...EMPTY_AGGREGATE_METRICS }
 let recordingProcessingMode: ProcessingMode = 'clean'
@@ -124,13 +128,13 @@ function loadRenderer(window: BrowserWindow, route: 'settings' | 'overlay'): voi
 
 function createSettingsWindow(): BrowserWindow {
   const window = new BrowserWindow({
-    width: 480,
-    height: 720,
-    minWidth: 420,
-    minHeight: 560,
+    width: 880,
+    height: 680,
+    minWidth: 760,
+    minHeight: 600,
     show: false,
     title: 'Voca Settings',
-    backgroundColor: '#111114',
+    backgroundColor: '#0d0d0e',
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 16 },
     webPreferences: {
@@ -202,6 +206,7 @@ function createTray(): Tray {
 
 function currentState(): AppState {
   return {
+    appVersion: app.getVersion(),
     listening,
     hotkeyMode,
     hotkeyMessage,
@@ -215,6 +220,7 @@ function currentState(): AppState {
     },
     processingMode,
     autoPaste,
+    overlayStyle,
     developerVocabulary: [...developerVocabulary],
     stats: summarizeMetrics(aggregateMetrics),
     recordingSessionId,
@@ -265,7 +271,7 @@ function updateTrayMenu(): void {
         checked: autoPaste,
         click: () => setAutoPaste(!autoPaste)
       },
-      { label: 'Settings…', click: showSettings },
+      { label: 'Settings', click: showSettings },
       { type: 'separator' },
       {
         label: 'Quit Voca',
@@ -319,6 +325,19 @@ function setAutoPaste(enabled: boolean): void {
   saveSettings()
   console.info(`[auto-paste] ${enabled ? 'on' : 'off'}`)
   broadcastState()
+}
+
+function setOverlayStyle(style: OverlayStyle): void {
+  if (overlayStyle === style) return
+  overlayStyle = style
+  saveSettings()
+  console.info(`[overlay] ${style}`)
+
+  if (overlayPhase === 'hidden') {
+    broadcastState()
+  } else {
+    setOverlay(overlayPhase, overlayText)
+  }
 }
 
 function beginHotkeyCapture(): HotkeyActionResult {
@@ -420,6 +439,7 @@ function saveSettings(): void {
   settingsStore?.save({
     processingMode,
     autoPaste,
+    overlayStyle,
     developerVocabulary,
     aggregateMetrics,
     hotkey,
@@ -448,12 +468,22 @@ function setOverlay(phase: OverlayPhase, text = ''): void {
   if (phase === 'hidden') {
     overlayWindow?.hide()
   } else {
-    const isResult = phase === 'transcript' || phase === 'copied'
-    overlayWindow?.setSize(
-      isResult ? RESULT_OVERLAY_WIDTH : COMPACT_OVERLAY_WIDTH,
-      isResult ? RESULT_OVERLAY_HEIGHT : COMPACT_OVERLAY_HEIGHT,
-      false
-    )
+    const minimalIndicator =
+      overlayStyle === 'minimal' &&
+      phase !== 'copied' &&
+      phase !== 'error'
+    const isDetailedResult = phase === 'transcript' || phase === 'copied'
+    const width = minimalIndicator
+      ? MINIMAL_OVERLAY_WIDTH
+      : isDetailedResult
+        ? RESULT_OVERLAY_WIDTH
+        : COMPACT_OVERLAY_WIDTH
+    const height = minimalIndicator
+      ? MINIMAL_OVERLAY_HEIGHT
+      : isDetailedResult
+        ? RESULT_OVERLAY_HEIGHT
+        : COMPACT_OVERLAY_HEIGHT
+    overlayWindow?.setSize(width, height, false)
     positionOverlay()
     overlayWindow?.showInactive()
   }
@@ -722,8 +752,12 @@ async function transcribeRecording(payload: RecordingPayload): Promise<void> {
       console.info(
         `[insertion] Pasted; clipboard ${insertionResult.clipboardRestored ? 'restored' : 'not restored'}`
       )
-      setOverlay('pasted', 'Pasted')
-      scheduleOverlayHide(payload.sessionId, 1_400)
+      if (overlayStyle === 'minimal') {
+        setOverlay('hidden')
+      } else {
+        setOverlay('pasted', 'Pasted')
+        scheduleOverlayHide(payload.sessionId, 1_400)
+      }
       return
     }
 
@@ -758,6 +792,20 @@ function isSettingsSender(webContentsId: number): boolean {
 function installIpcHandlers(): void {
   ipcMain.handle(IPC.getAppState, () => currentState())
   ipcMain.handle(IPC.toggleListening, () => toggleListening('settings'))
+  ipcMain.handle(IPC.setProcessingMode, (event, mode: unknown) => {
+    if (!isSettingsSender(event.sender.id)) return
+    if (mode !== 'raw' && mode !== 'clean' && mode !== 'dev-prompt') return
+    setProcessingMode(mode)
+  })
+  ipcMain.handle(IPC.setAutoPaste, (event, enabled: unknown) => {
+    if (!isSettingsSender(event.sender.id) || typeof enabled !== 'boolean') return
+    setAutoPaste(enabled)
+  })
+  ipcMain.handle(IPC.setOverlayStyle, (event, style: unknown) => {
+    if (!isSettingsSender(event.sender.id)) return
+    if (style !== 'detailed' && style !== 'minimal') return
+    setOverlayStyle(style)
+  })
   ipcMain.handle(IPC.addVocabularyTerm, (event, term: unknown) => {
     if (event.sender.id !== settingsWindow?.webContents.id || typeof term !== 'string') return false
     return addVocabularyTerm(term)
@@ -909,6 +957,7 @@ void app.whenReady().then(async () => {
   await providerCredentialsService.initialize()
   processingMode = savedSettings.processingMode
   autoPaste = savedSettings.autoPaste
+  overlayStyle = savedSettings.overlayStyle
   developerVocabulary = savedSettings.developerVocabulary
   aggregateMetrics = savedSettings.aggregateMetrics
   hotkey = savedSettings.hotkey
@@ -920,6 +969,7 @@ void app.whenReady().then(async () => {
   }
   console.info(`[mode] ${processingMode}`)
   console.info(`[auto-paste] ${autoPaste ? 'on' : 'off'}`)
+  console.info(`[overlay] ${overlayStyle}`)
   console.info(`[vocabulary] ${developerVocabulary.length} terms loaded`)
 
   settingsWindow = createSettingsWindow()

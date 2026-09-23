@@ -4,6 +4,9 @@ export const IPC = {
   getAppState: 'voca:get-app-state',
   listeningChanged: 'voca:listening-changed',
   toggleListening: 'voca:toggle-listening',
+  setProcessingMode: 'voca:set-processing-mode',
+  setAutoPaste: 'voca:set-auto-paste',
+  setOverlayStyle: 'voca:set-overlay-style',
   addVocabularyTerm: 'voca:add-vocabulary-term',
   removeVocabularyTerm: 'voca:remove-vocabulary-term',
   beginHotkeyCapture: 'voca:begin-hotkey-capture',
@@ -24,6 +27,7 @@ export const IPC = {
 
 export type HotkeyMode = 'hold' | 'toggle'
 export type ProcessingMode = 'raw' | 'clean' | 'dev-prompt'
+export type OverlayStyle = 'detailed' | 'minimal'
 export type ProviderId = 'groq' | 'gemini'
 export type ProviderStatus = 'connected' | 'missing' | 'invalid'
 export type ProviderValidationState = 'valid' | 'invalid' | 'not-tested'
@@ -71,6 +75,7 @@ export type OverlayPhase =
   | 'error'
 
 export interface AppState {
+  appVersion: string
   listening: boolean
   hotkeyMode: HotkeyMode
   hotkeyMessage: string
@@ -81,6 +86,7 @@ export interface AppState {
   providers: Record<ProviderId, ProviderConnectionState>
   processingMode: ProcessingMode
   autoPaste: boolean
+  overlayStyle: OverlayStyle
   developerVocabulary: string[]
   stats: StatsSummary
   recordingSessionId: number

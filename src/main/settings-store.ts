@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { AggregateMetrics, ProcessingMode } from '../shared/ipc'
+import type { AggregateMetrics, OverlayStyle, ProcessingMode } from '../shared/ipc'
 import { copyHotkey, DEFAULT_HOTKEY, normalizeHotkey, validateHotkey } from '../shared/hotkey'
 import type { HotkeyConfig } from '../shared/hotkey'
 import { normalizeVocabulary } from './developer-vocabulary'
@@ -9,6 +9,7 @@ import { EMPTY_AGGREGATE_METRICS, sanitizeAggregateMetrics } from './performance
 export interface AppSettings {
   processingMode: ProcessingMode
   autoPaste: boolean
+  overlayStyle: OverlayStyle
   developerVocabulary: string[]
   aggregateMetrics: AggregateMetrics
   hotkey: HotkeyConfig
@@ -22,6 +23,7 @@ export interface LoadedAppSettings extends AppSettings {
 const DEFAULT_SETTINGS: AppSettings = {
   processingMode: 'clean',
   autoPaste: true,
+  overlayStyle: 'detailed',
   developerVocabulary: [],
   aggregateMetrics: EMPTY_AGGREGATE_METRICS,
   hotkey: DEFAULT_HOTKEY,
@@ -30,6 +32,10 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 function isProcessingMode(value: unknown): value is ProcessingMode {
   return value === 'raw' || value === 'clean' || value === 'dev-prompt'
+}
+
+function isOverlayStyle(value: unknown): value is OverlayStyle {
+  return value === 'detailed' || value === 'minimal'
 }
 
 function loadHotkey(value: unknown): HotkeyConfig {
@@ -45,6 +51,7 @@ export class SettingsStore {
       const settings = JSON.parse(readFileSync(this.filePath, 'utf8')) as {
         processingMode?: unknown
         autoPaste?: unknown
+        overlayStyle?: unknown
         developerVocabulary?: unknown
         aggregateMetrics?: unknown
         hotkey?: unknown
@@ -56,6 +63,9 @@ export class SettingsStore {
           : DEFAULT_SETTINGS.processingMode,
         autoPaste:
           typeof settings.autoPaste === 'boolean' ? settings.autoPaste : DEFAULT_SETTINGS.autoPaste,
+        overlayStyle: isOverlayStyle(settings.overlayStyle)
+          ? settings.overlayStyle
+          : DEFAULT_SETTINGS.overlayStyle,
         developerVocabulary: normalizeVocabulary(settings.developerVocabulary),
         aggregateMetrics: sanitizeAggregateMetrics(settings.aggregateMetrics),
         hotkey: loadHotkey(settings.hotkey),
