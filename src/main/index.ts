@@ -9,6 +9,7 @@ import {
   Menu,
   screen,
   session,
+  shell,
   systemPreferences,
   Tray
 } from 'electron'
@@ -30,6 +31,9 @@ import {
   summarizeMetrics
 } from './performance-metrics'
 import { SettingsStore } from './settings-store'
+import { APIKeyStore } from './api-key-store'
+import { ProviderCredentialsService } from './provider-credentials-service'
+import { MissingProviderKeyError } from './provider-errors'
 import { TextInsertionService } from './text-insertion-service'
 import { createTrayImage } from './tray-icon'
 import { IPC } from '../shared/ipc'
@@ -48,7 +52,9 @@ import type {
   OverlayPhase,
   ProcessingMode,
   RecordingErrorPayload,
-  RecordingPayload
+  RecordingPayload,
+  PermissionSettingsTarget,
+  ProviderId
 } from '../shared/ipc'
 
 loadEnvironment({ path: join(process.cwd(), '.env'), quiet: true })
@@ -62,8 +68,12 @@ const MAX_AUDIO_BYTES = 25 * 1024 * 1024
 const RECORDING_DELIVERY_TIMEOUT_MS = 5_000
 const ERROR_DISPLAY_MS = 2_200
 
-const transcriptionService = new GroqTranscriptionService(process.env.GROQ_API_KEY)
-const geminiProcessingService = new GeminiProcessingService(process.env.GEMINI_API_KEY)
+const transcriptionService = new GroqTranscriptionService(() =>
+  providerCredentialsService?.getKey('groq')
+)
+const geminiProcessingService = new GeminiProcessingService(() =>
+  providerCredentialsService?.getKey('gemini')
+)
 const textInsertionService = new TextInsertionService()
 const activeAppService = new ActiveAppService()
 const selectedTextService = new SelectedTextService()
@@ -73,6 +83,7 @@ let overlayWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let hotkeyService: HotkeyService | null = null
 let settingsStore: SettingsStore | null = null
+let providerCredentialsService: ProviderCredentialsService | null = null
 let listening = false
 let pendingStartToken: number | null = null
 let transitionToken = 0
@@ -81,6 +92,8 @@ let hotkeyMessage = 'Starting keyboard shortcut…'
 let hotkey: HotkeyConfig = copyHotkey(DEFAULT_HOTKEY)
 let hotkeyCaptureActive = false
 let microphoneStatus = 'unknown'
+let accessibilityGranted = false
+let onboardingComplete = false
 let processingMode: ProcessingMode = 'clean'
 let autoPaste = true
 let developerVocabulary: string[] = []
@@ -194,6 +207,12 @@ function currentState(): AppState {
     hotkeyMessage,
     hotkey: copyHotkey(hotkey),
     microphoneStatus,
+    accessibilityGranted,
+    onboardingComplete,
+    providers: providerCredentialsService?.getStates() ?? {
+      groq: { id: 'groq', status: 'missing', validation: 'not-tested', source: 'none' },
+      gemini: { id: 'gemini', status: 'missing', validation: 'not-tested', source: 'none' }
+    },
     processingMode,
     autoPaste,
     developerVocabulary: [...developerVocabulary],
@@ -398,7 +417,14 @@ function removeVocabularyTerm(value: string): boolean {
 }
 
 function saveSettings(): void {
-  settingsStore?.save({ processingMode, autoPaste, developerVocabulary, aggregateMetrics, hotkey })
+  settingsStore?.save({
+    processingMode,
+    autoPaste,
+    developerVocabulary,
+    aggregateMetrics,
+    hotkey,
+    onboardingComplete
+  })
 }
 
 function clearRecordingDeliveryTimer(): void {
@@ -453,6 +479,12 @@ function showOperationFailure(
   overlayMessage = 'Transcription failed',
   operation = 'transcription'
 ): void {
+  if (error instanceof MissingProviderKeyError) {
+    const name = error.provider === 'groq' ? 'Groq' : 'Gemini'
+    overlayMessage = `${name} API key required — open Settings`
+    operation = `${error.provider} credentials`
+    showSettings()
+  }
   console.error(`[${operation}] Failed:`, readableError(error))
   if (sessionId !== recordingSessionId) return
 
@@ -711,6 +743,18 @@ async function transcribeRecording(payload: RecordingPayload): Promise<void> {
   }
 }
 
+function isProviderId(value: unknown): value is ProviderId {
+  return value === 'groq' || value === 'gemini'
+}
+
+function isPermissionSettingsTarget(value: unknown): value is PermissionSettingsTarget {
+  return value === 'microphone' || value === 'accessibility' || value === 'input-monitoring'
+}
+
+function isSettingsSender(webContentsId: number): boolean {
+  return webContentsId === settingsWindow?.webContents.id
+}
+
 function installIpcHandlers(): void {
   ipcMain.handle(IPC.getAppState, () => currentState())
   ipcMain.handle(IPC.toggleListening, () => toggleListening('settings'))
@@ -745,6 +789,70 @@ function installIpcHandlers(): void {
       return { success: false, message: 'Shortcut changes are only available in Settings.' }
     }
     return resetHotkey()
+  })
+  ipcMain.handle(IPC.setProviderKey, async (event, provider: unknown, key: unknown) => {
+    if (!isSettingsSender(event.sender.id) || !isProviderId(provider) || typeof key !== 'string') {
+      throw new Error('Invalid provider key request')
+    }
+    if (!providerCredentialsService) throw new Error('Credential storage is not ready')
+    const result = await providerCredentialsService.setKey(provider, key)
+    broadcastState()
+    return result
+  })
+  ipcMain.handle(IPC.removeProviderKey, async (event, provider: unknown) => {
+    if (!isSettingsSender(event.sender.id) || !isProviderId(provider)) {
+      throw new Error('Invalid provider key request')
+    }
+    if (!providerCredentialsService) throw new Error('Credential storage is not ready')
+    const result = await providerCredentialsService.removeKey(provider)
+    broadcastState()
+    return result
+  })
+  ipcMain.handle(IPC.validateProvider, async (event, provider: unknown) => {
+    if (!isSettingsSender(event.sender.id) || !isProviderId(provider)) {
+      throw new Error('Invalid provider validation request')
+    }
+    if (!providerCredentialsService) throw new Error('Credential storage is not ready')
+    const result = await providerCredentialsService.validate(provider)
+    broadcastState()
+    return result
+  })
+  ipcMain.handle(IPC.openProviderKeyPage, async (event, provider: unknown) => {
+    if (!isSettingsSender(event.sender.id) || !isProviderId(provider)) return
+    const url =
+      provider === 'groq'
+        ? 'https://console.groq.com/keys'
+        : 'https://aistudio.google.com/app/apikey'
+    await shell.openExternal(url)
+  })
+  ipcMain.handle(IPC.requestMicrophonePermission, async (event) => {
+    if (!isSettingsSender(event.sender.id)) return false
+    return ensureMicrophonePermission()
+  })
+  ipcMain.handle(IPC.requestAccessibilityPermission, (event) => {
+    if (!isSettingsSender(event.sender.id)) return false
+    accessibilityGranted =
+      process.platform === 'darwin' ? systemPreferences.isTrustedAccessibilityClient(true) : true
+    broadcastState()
+    return accessibilityGranted
+  })
+  ipcMain.handle(IPC.openPermissionSettings, async (event, target: unknown) => {
+    if (!isSettingsSender(event.sender.id) || !isPermissionSettingsTarget(target)) return
+    const pane =
+      target === 'microphone'
+        ? 'Privacy_Microphone'
+        : target === 'accessibility'
+          ? 'Privacy_Accessibility'
+          : 'Privacy_ListenEvent'
+    await shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${pane}`)
+  })
+  ipcMain.handle(IPC.completeOnboarding, (event) => {
+    if (!isSettingsSender(event.sender.id)) return false
+    if (!providerCredentialsService?.hasAllRequiredKeys()) return false
+    onboardingComplete = true
+    saveSettings()
+    broadcastState()
+    return true
   })
 
   ipcMain.handle(IPC.transcribeRecording, async (event, payload: unknown) => {
@@ -785,22 +893,39 @@ function configureMediaPermissions(): void {
   })
 }
 
-app.whenReady().then(() => {
+void app.whenReady().then(async () => {
   app.setName('Voca')
   app.dock?.hide()
 
   settingsStore = new SettingsStore(join(app.getPath('userData'), 'settings.json'))
   const savedSettings = settingsStore.load()
+  providerCredentialsService = new ProviderCredentialsService(
+    new APIKeyStore(join(app.getPath('userData'), 'provider-keys.json')),
+    {
+      ...(process.env.GROQ_API_KEY?.trim() ? { groq: process.env.GROQ_API_KEY.trim() } : {}),
+      ...(process.env.GEMINI_API_KEY?.trim() ? { gemini: process.env.GEMINI_API_KEY.trim() } : {})
+    }
+  )
+  await providerCredentialsService.initialize()
   processingMode = savedSettings.processingMode
   autoPaste = savedSettings.autoPaste
   developerVocabulary = savedSettings.developerVocabulary
   aggregateMetrics = savedSettings.aggregateMetrics
   hotkey = savedSettings.hotkey
+  onboardingComplete = savedSettings.onboardingComplete
+  if (!savedSettings.onboardingStateWasPresent) {
+    // Existing development installs with both .env keys stay configured after this migration.
+    onboardingComplete = providerCredentialsService.hasAllRequiredKeys()
+    saveSettings()
+  }
   console.info(`[mode] ${processingMode}`)
   console.info(`[auto-paste] ${autoPaste ? 'on' : 'off'}`)
   console.info(`[vocabulary] ${developerVocabulary.length} terms loaded`)
 
   settingsWindow = createSettingsWindow()
+  settingsWindow.once('ready-to-show', () => {
+    if (!onboardingComplete) showSettings()
+  })
   overlayWindow = createOverlayWindow()
   tray = createTray()
   installIpcHandlers()
@@ -819,6 +944,8 @@ app.whenReady().then(() => {
   console.info(`[hotkey] ${status.message}`)
   microphoneStatus =
     process.platform === 'darwin' ? systemPreferences.getMediaAccessStatus('microphone') : 'unknown'
+  accessibilityGranted =
+    process.platform === 'darwin' ? systemPreferences.isTrustedAccessibilityClient(false) : true
   broadcastState()
 })
 

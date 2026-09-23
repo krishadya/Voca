@@ -1,6 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '../shared/ipc'
-import type { AppState, RecordingErrorPayload, RecordingPayload } from '../shared/ipc'
+import type {
+  AppState,
+  PermissionSettingsTarget,
+  ProviderActionResult,
+  ProviderId,
+  RecordingErrorPayload,
+  RecordingPayload
+} from '../shared/ipc'
 import type { HotkeyActionResult, HotkeyConfig } from '../shared/hotkey'
 
 const api = {
@@ -17,6 +24,21 @@ const api = {
   setHotkey: (hotkey: HotkeyConfig): Promise<HotkeyActionResult> =>
     ipcRenderer.invoke(IPC.setHotkey, hotkey),
   resetHotkey: (): Promise<HotkeyActionResult> => ipcRenderer.invoke(IPC.resetHotkey),
+  setProviderKey: (provider: ProviderId, key: string): Promise<ProviderActionResult> =>
+    ipcRenderer.invoke(IPC.setProviderKey, provider, key),
+  removeProviderKey: (provider: ProviderId): Promise<ProviderActionResult> =>
+    ipcRenderer.invoke(IPC.removeProviderKey, provider),
+  validateProvider: (provider: ProviderId): Promise<ProviderActionResult> =>
+    ipcRenderer.invoke(IPC.validateProvider, provider),
+  openProviderKeyPage: (provider: ProviderId): Promise<void> =>
+    ipcRenderer.invoke(IPC.openProviderKeyPage, provider),
+  requestMicrophonePermission: (): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.requestMicrophonePermission),
+  requestAccessibilityPermission: (): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.requestAccessibilityPermission),
+  openPermissionSettings: (target: PermissionSettingsTarget): Promise<void> =>
+    ipcRenderer.invoke(IPC.openPermissionSettings, target),
+  completeOnboarding: (): Promise<boolean> => ipcRenderer.invoke(IPC.completeOnboarding),
   onListeningChanged: (callback: (state: AppState) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, state: AppState): void => callback(state)
     ipcRenderer.on(IPC.listeningChanged, listener)

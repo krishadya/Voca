@@ -1,5 +1,6 @@
 import type { ProcessingMode } from '../shared/ipc'
 import type { ActiveAppInfo } from './active-app-service'
+import { MissingProviderKeyError } from './provider-errors'
 
 export const GEMINI_MODEL = 'gemini-3.5-flash-lite'
 
@@ -109,22 +110,21 @@ function apiErrorMessage(response: GeminiResponse, status: number): string {
 }
 
 export class GeminiProcessingService {
-  constructor(private readonly apiKey: string | undefined) {}
+  constructor(private readonly getApiKey: () => string | undefined) {}
 
   async process(
     text: string,
     mode: Exclude<ProcessingMode, 'raw'>,
     context?: GeminiProcessingContext
   ): Promise<string> {
-    if (!this.apiKey) {
-      throw new Error('GEMINI_API_KEY is missing. Add it to the local .env file and restart Voca.')
-    }
+    const apiKey = this.getApiKey()
+    if (!apiKey) throw new MissingProviderKeyError('gemini')
 
     const response = await fetch(GENERATE_CONTENT_ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-goog-api-key': this.apiKey
+        'x-goog-api-key': apiKey
       },
       body: JSON.stringify({
         systemInstruction: {

@@ -10,12 +10,38 @@ export const IPC = {
   cancelHotkeyCapture: 'voca:cancel-hotkey-capture',
   setHotkey: 'voca:set-hotkey',
   resetHotkey: 'voca:reset-hotkey',
+  setProviderKey: 'voca:set-provider-key',
+  removeProviderKey: 'voca:remove-provider-key',
+  validateProvider: 'voca:validate-provider',
+  openProviderKeyPage: 'voca:open-provider-key-page',
+  requestMicrophonePermission: 'voca:request-microphone-permission',
+  requestAccessibilityPermission: 'voca:request-accessibility-permission',
+  openPermissionSettings: 'voca:open-permission-settings',
+  completeOnboarding: 'voca:complete-onboarding',
   transcribeRecording: 'voca:transcribe-recording',
   recordingError: 'voca:recording-error'
 } as const
 
 export type HotkeyMode = 'hold' | 'toggle'
 export type ProcessingMode = 'raw' | 'clean' | 'dev-prompt'
+export type ProviderId = 'groq' | 'gemini'
+export type ProviderStatus = 'connected' | 'missing' | 'invalid'
+export type ProviderValidationState = 'valid' | 'invalid' | 'not-tested'
+export type ProviderKeySource = 'secure-store' | 'environment' | 'none'
+export type PermissionSettingsTarget = 'microphone' | 'accessibility' | 'input-monitoring'
+
+export interface ProviderConnectionState {
+  id: ProviderId
+  status: ProviderStatus
+  validation: ProviderValidationState
+  source: ProviderKeySource
+}
+
+export interface ProviderActionResult {
+  success: boolean
+  message: string
+  state: ProviderConnectionState
+}
 
 export interface AggregateMetrics {
   totalSuccessfulDictations: number
@@ -50,6 +76,9 @@ export interface AppState {
   hotkeyMessage: string
   hotkey: HotkeyConfig
   microphoneStatus: string
+  accessibilityGranted: boolean
+  onboardingComplete: boolean
+  providers: Record<ProviderId, ProviderConnectionState>
   processingMode: ProcessingMode
   autoPaste: boolean
   developerVocabulary: string[]

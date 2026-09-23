@@ -1,4 +1,5 @@
 import { buildGroqVocabularyPrompt } from './developer-vocabulary'
+import { MissingProviderKeyError } from './provider-errors'
 
 const TRANSCRIPTIONS_ENDPOINT = 'https://api.groq.com/openai/v1/audio/transcriptions'
 const MODEL = 'whisper-large-v3-turbo'
@@ -34,12 +35,11 @@ function errorMessage(response: GroqTranscriptionResponse, status: number): stri
 }
 
 export class GroqTranscriptionService {
-  constructor(private readonly apiKey: string | undefined) {}
+  constructor(private readonly getApiKey: () => string | undefined) {}
 
   async transcribe({ audio, mimeType, vocabulary = [] }: TranscriptionInput): Promise<string> {
-    if (!this.apiKey) {
-      throw new Error('GROQ_API_KEY is missing. Add it to the local .env file and restart Voca.')
-    }
+    const apiKey = this.getApiKey()
+    if (!apiKey) throw new MissingProviderKeyError('groq')
 
     const audioBytes = new Uint8Array(audio)
     const audioBlob = new Blob([audioBytes], { type: mimeType })
@@ -55,7 +55,7 @@ export class GroqTranscriptionService {
     const response = await fetch(TRANSCRIPTIONS_ENDPOINT, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${this.apiKey}`
+        Authorization: `Bearer ${apiKey}`
       },
       body: form,
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)

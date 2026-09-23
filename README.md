@@ -2,12 +2,14 @@
 
 Voca is a macOS-first desktop voice tool. Hold the configured push-to-talk shortcut to record, release it to transcribe with Groq, and optionally transform and insert the text with Gemini.
 
-This milestone includes transcription, lightweight text processing, auto-paste, session-scoped app/selection context, custom developer vocabulary, and local aggregate performance stats. It does not include accounts, history, repository indexing, commands, analytics, or a database.
+This milestone includes first-run setup, secure local API-key management, transcription, lightweight text processing, auto-paste, session-scoped app/selection context, custom developer vocabulary, and local aggregate performance stats. It does not include accounts, history, repository indexing, commands, analytics, or a database.
 
 ## Current milestone
 
 - Electron + React + TypeScript, built with electron-vite
 - Context-isolated renderer with a narrow preload IPC bridge
+- First-run onboarding for providers, permissions, shortcut selection, and a voice test
+- Groq and Gemini key management backed by Electron `safeStorage`
 - Menu-bar controls for starting/stopping, opening Settings, and quitting
 - Customizable push-to-talk shortcut (F8 by default)
 - Hold-to-talk when macOS Accessibility access is available
@@ -28,14 +30,29 @@ Requirements: macOS, Node.js 22.12 or newer, and npm.
 
 ```bash
 npm install
-cp .env.example .env
-# Add your GROQ_API_KEY and GEMINI_API_KEY to .env
 npm run dev
 ```
 
-Both API keys are loaded only by the Electron main process and are never exposed to the React renderer. Do not commit `.env`.
+On first launch, Voca opens its setup flow. Add Groq and Gemini keys there; no `.env` editing is required. Both keys are handled by the Electron main process and are not returned to the React renderer after entry.
+
+For development, `.env` remains an optional fallback:
+
+```bash
+cp .env.example .env
+# Optionally add GROQ_API_KEY and GEMINI_API_KEY
+```
+
+A key saved in Settings takes priority over the matching `.env` value. Removing a saved key returns that provider to the `.env` fallback when one exists. Do not commit `.env`.
 
 The app runs in the menu bar. Click the Voca microphone icon for controls or choose **Settings…**.
+
+## Onboarding and API keys
+
+Voca shows onboarding until setup is completed. It covers the voice workflow, Groq and Gemini keys, macOS permissions, the current push-to-talk shortcut, and a short voice test. Completion is stored as a boolean in Voca's local `settings.json`; existing development installs with both `.env` keys are migrated as already configured.
+
+In **Settings… → Providers / API Keys**, each provider shows Connected, Missing, or Invalid plus a Valid, Invalid, or Not tested connection state. **Test Connection** performs a lightweight authenticated model-list request to that provider. It does not upload audio or prompt text.
+
+User-entered keys are encrypted with Electron `safeStorage` before Voca writes them to `provider-keys.json` in the app's user-data directory. On macOS, `safeStorage` uses Keychain-backed encryption. Only encrypted ciphertext is stored in that file; keys are decrypted only in the main process when needed. Groq receives its key only for Groq requests, and Google receives its key only for Gemini requests.
 
 ## Processing modes
 
@@ -107,6 +124,10 @@ Supported base keys are F1–F12, Space, and A–Z. Space and letter keys requir
 ## Known limitations
 
 - This milestone targets macOS only and is not code-signed or notarized.
+- Secure key storage uses the macOS Keychain. Because development builds are unsigned, macOS may show Keychain prompts again when the Electron binary changes; a consistently signed production build avoids that behavior.
+- Provider validation requires network access. Temporary provider/network failures remain **Not tested**; explicit authentication rejections are shown as **Invalid**.
+- Validation state is session-only and returns to **Not tested** after restart; keys and onboarding completion remain persisted.
+- Completing onboarding requires both provider keys. At runtime, Raw mode only needs Groq, while Clean and Dev Prompt also need Gemini.
 - Permission changes generally require restarting the app.
 - Development permission entries belong to the Electron development binary; a packaged Voca app receives its own entries.
 - The native hook can require both Accessibility and Input Monitoring on some macOS versions. The app falls back cleanly to toggle behavior when Accessibility access is unavailable or hook startup fails.

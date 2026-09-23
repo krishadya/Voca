@@ -12,6 +12,11 @@ export interface AppSettings {
   developerVocabulary: string[]
   aggregateMetrics: AggregateMetrics
   hotkey: HotkeyConfig
+  onboardingComplete: boolean
+}
+
+export interface LoadedAppSettings extends AppSettings {
+  onboardingStateWasPresent: boolean
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -19,7 +24,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoPaste: true,
   developerVocabulary: [],
   aggregateMetrics: EMPTY_AGGREGATE_METRICS,
-  hotkey: DEFAULT_HOTKEY
+  hotkey: DEFAULT_HOTKEY,
+  onboardingComplete: false
 }
 
 function isProcessingMode(value: unknown): value is ProcessingMode {
@@ -34,7 +40,7 @@ function loadHotkey(value: unknown): HotkeyConfig {
 export class SettingsStore {
   constructor(private readonly filePath: string) {}
 
-  load(): AppSettings {
+  load(): LoadedAppSettings {
     try {
       const settings = JSON.parse(readFileSync(this.filePath, 'utf8')) as {
         processingMode?: unknown
@@ -42,6 +48,7 @@ export class SettingsStore {
         developerVocabulary?: unknown
         aggregateMetrics?: unknown
         hotkey?: unknown
+        onboardingComplete?: unknown
       }
       return {
         processingMode: isProcessingMode(settings.processingMode)
@@ -51,7 +58,12 @@ export class SettingsStore {
           typeof settings.autoPaste === 'boolean' ? settings.autoPaste : DEFAULT_SETTINGS.autoPaste,
         developerVocabulary: normalizeVocabulary(settings.developerVocabulary),
         aggregateMetrics: sanitizeAggregateMetrics(settings.aggregateMetrics),
-        hotkey: loadHotkey(settings.hotkey)
+        hotkey: loadHotkey(settings.hotkey),
+        onboardingComplete:
+          typeof settings.onboardingComplete === 'boolean'
+            ? settings.onboardingComplete
+            : DEFAULT_SETTINGS.onboardingComplete,
+        onboardingStateWasPresent: typeof settings.onboardingComplete === 'boolean'
       }
     } catch (error) {
       const code = error instanceof Error && 'code' in error ? error.code : undefined
@@ -60,7 +72,8 @@ export class SettingsStore {
         ...DEFAULT_SETTINGS,
         developerVocabulary: [],
         aggregateMetrics: { ...EMPTY_AGGREGATE_METRICS },
-        hotkey: copyHotkey(DEFAULT_HOTKEY)
+        hotkey: copyHotkey(DEFAULT_HOTKEY),
+        onboardingStateWasPresent: false
       }
     }
   }
