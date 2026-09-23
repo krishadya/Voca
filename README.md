@@ -1,6 +1,6 @@
 # Voca
 
-Voca is a macOS-first desktop voice tool. Hold F8 to record, release it to transcribe the recording with Groq, and optionally transform and insert the text with Gemini.
+Voca is a macOS-first desktop voice tool. Hold the configured push-to-talk shortcut to record, release it to transcribe with Groq, and optionally transform and insert the text with Gemini.
 
 This milestone includes transcription, lightweight text processing, auto-paste, session-scoped app/selection context, custom developer vocabulary, and local aggregate performance stats. It does not include accounts, history, repository indexing, commands, analytics, or a database.
 
@@ -9,9 +9,9 @@ This milestone includes transcription, lightweight text processing, auto-paste, 
 - Electron + React + TypeScript, built with electron-vite
 - Context-isolated renderer with a narrow preload IPC bridge
 - Menu-bar controls for starting/stopping, opening Settings, and quitting
-- F8 shortcut
+- Customizable push-to-talk shortcut (F8 by default)
 - Hold-to-talk when macOS Accessibility access is available
-- Automatic F8 toggle fallback when native key monitoring cannot start
+- Automatic toggle fallback when native key monitoring cannot start
 - Microphone capture with `MediaRecorder`; recordings are not saved to disk
 - Groq speech-to-text using `whisper-large-v3-turbo`
 - Optional Gemini processing using `gemini-3.5-flash-lite`
@@ -55,7 +55,7 @@ Voca passes a concise subset of the terms to Groq's supported transcription `pro
 
 ## Performance stats
 
-Each successful dictation measures recording duration, Groq transcription latency, Gemini processing latency, total time from F8 release to final output, and final word count. Raw mode reports Gemini processing as not applicable.
+Each successful dictation measures recording duration, Groq transcription latency, Gemini processing latency, total time from shortcut release to final output, and final word count. Raw mode reports Gemini processing as not applicable.
 
 The Settings **Stats** section shows successful dictations, total words, and average transcription, Gemini, and total latency. Only cumulative counts and timing totals are persisted in `settings.json`; per-recording metrics appear in development logs but transcript content is never added to metrics. Voca does not send metrics anywhere.
 
@@ -91,14 +91,18 @@ Voca requests only the permissions needed for this milestone:
 1. **Microphone** — requested the first time listening starts. If denied, enable Voca (or Electron while running in development) in **System Settings → Privacy & Security → Microphone**.
 2. **Accessibility** — requested for reliable global key-down/key-up monitoring, selection capture, and auto-paste. Enable Voca (or Electron while running in development) in **System Settings → Privacy & Security → Accessibility**, then restart the app.
 
-Depending on the macOS version and how the app is launched, macOS may place the native keyboard hook under **Input Monitoring** instead. If F8 does not respond after enabling Accessibility, also enable Voca/Electron in **System Settings → Privacy & Security → Input Monitoring** and restart.
+Depending on the macOS version and how the app is launched, macOS may place the native keyboard hook under **Input Monitoring** instead. If the configured shortcut does not respond after enabling Accessibility, also enable Voca/Electron in **System Settings → Privacy & Security → Input Monitoring** and restart.
 
-Voca continues to work without Accessibility/Input Monitoring access: F8 switches to toggle mode, and the menu-bar Start/Stop control always remains available. The Settings screen shows which shortcut mode is active.
+Voca continues to work without Accessibility/Input Monitoring access: the configured shortcut switches to toggle mode, and the menu-bar Start/Stop control always remains available. The Settings screen shows which shortcut mode is active.
 
-## Current shortcut
+## Push-to-talk shortcut
 
-- **Hold mode:** hold **F8** to listen; release F8 to stop.
-- **Fallback mode:** press **F8** once to start and again to stop.
+The default shortcut is **F8**. Open **Settings… → Push-to-Talk Shortcut**, choose **Change Shortcut**, then press the new combination. Escape cancels capture, and **Reset to F8** restores the default. Changes apply immediately and are saved in the same local `settings.json` as the other preferences.
+
+Supported base keys are F1–F12, Space, and A–Z. Space and letter keys require at least one Command, Control, Option, or Shift modifier. Modifier-only and selected macOS/app-reserved shortcuts are rejected without replacing the working shortcut.
+
+- **Hold mode:** hold the configured shortcut to listen; release its base key or a required modifier to stop.
+- **Fallback mode:** press the configured shortcut once to start and again to stop.
 
 ## Known limitations
 
@@ -122,3 +126,5 @@ Voca continues to work without Accessibility/Input Monitoring access: F8 switche
 - Frontmost-app metadata is captured once when recording starts and is not updated if the user changes apps during processing.
 - Groq limits transcription prompts to 224 tokens, so Voca bounds its spelling hint; unusually large vocabulary lists may not fit entirely in the Groq hint. Gemini still receives the full saved list.
 - Average Gemini latency includes only successful Clean and Dev Prompt requests. Raw dictations are excluded from that average.
+- The native hook observes shortcuts but does not suppress them. A combination already used by the frontmost app may perform that app action as well, so function keys or otherwise unused combinations are safest.
+- Some Mac keyboards treat F1–F12 as hardware/media controls unless the Fn key or the system's standard-function-key setting is enabled.

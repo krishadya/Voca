@@ -33,6 +33,14 @@ import { SettingsStore } from './settings-store'
 import { TextInsertionService } from './text-insertion-service'
 import { createTrayImage } from './tray-icon'
 import { IPC } from '../shared/ipc'
+import {
+  copyHotkey,
+  DEFAULT_HOTKEY,
+  formatHotkey,
+  normalizeHotkey,
+  validateHotkey
+} from '../shared/hotkey'
+import type { HotkeyActionResult, HotkeyConfig } from '../shared/hotkey'
 import type {
   AppState,
   AggregateMetrics,
@@ -70,6 +78,8 @@ let pendingStartToken: number | null = null
 let transitionToken = 0
 let hotkeyMode: HotkeyMode = 'toggle'
 let hotkeyMessage = 'Starting keyboard shortcut…'
+let hotkey: HotkeyConfig = copyHotkey(DEFAULT_HOTKEY)
+let hotkeyCaptureActive = false
 let microphoneStatus = 'unknown'
 let processingMode: ProcessingMode = 'clean'
 let autoPaste = true
@@ -126,6 +136,10 @@ function createSettingsWindow(): BrowserWindow {
     }
   })
 
+  window.on('hide', () => {
+    if (hotkeyCaptureActive) cancelHotkeyCapture()
+  })
+
   loadRenderer(window, 'settings')
   return window
 }
@@ -178,6 +192,7 @@ function currentState(): AppState {
     listening,
     hotkeyMode,
     hotkeyMessage,
+    hotkey: copyHotkey(hotkey),
     microphoneStatus,
     processingMode,
     autoPaste,
@@ -198,8 +213,10 @@ function updateTrayMenu(): void {
       { type: 'separator' },
       {
         label: listening ? 'Stop Listening' : 'Start Listening',
+        enabled: !hotkeyCaptureActive,
         click: () => void toggleListening('menu')
       },
+      { label: `Shortcut: ${formatHotkey(hotkey)}`, enabled: false },
       {
         label: 'Mode',
         submenu: [
@@ -285,6 +302,71 @@ function setAutoPaste(enabled: boolean): void {
   broadcastState()
 }
 
+function beginHotkeyCapture(): HotkeyActionResult {
+  if (listening || pendingStartToken !== null) {
+    return { success: false, message: 'Stop listening before changing the shortcut.' }
+  }
+  if (!hotkeyService) return { success: false, message: 'The shortcut service is not ready.' }
+  if (hotkeyCaptureActive) return { success: true, message: 'Press your new shortcut…' }
+
+  hotkeyService.suspend()
+  hotkeyCaptureActive = true
+  updateTrayMenu()
+  return { success: true, message: 'Press your new shortcut…' }
+}
+
+function cancelHotkeyCapture(): HotkeyActionResult {
+  if (!hotkeyCaptureActive) return { success: true, message: hotkeyMessage }
+  hotkeyCaptureActive = false
+
+  const result = hotkeyService?.resume() ?? {
+    success: false,
+    message: 'The shortcut service is not ready.'
+  }
+  hotkeyMessage = result.message
+  broadcastState()
+  return result
+}
+
+function setHotkey(value: unknown): HotkeyActionResult {
+  if (listening || pendingStartToken !== null) {
+    return { success: false, message: 'Stop listening before changing the shortcut.' }
+  }
+
+  const nextHotkey = normalizeHotkey(value)
+  const validationError = nextHotkey ? validateHotkey(nextHotkey) : 'That shortcut is not supported.'
+
+  if (!nextHotkey || validationError) {
+    const resumeResult = cancelHotkeyCapture()
+    return {
+      success: false,
+      message: resumeResult.success ? validationError ?? 'That shortcut is not supported.' : resumeResult.message
+    }
+  }
+
+  if (!hotkeyService) {
+    hotkeyCaptureActive = false
+    return { success: false, message: 'The shortcut service is not ready.' }
+  }
+
+  const result = hotkeyService.reconfigure(nextHotkey)
+  hotkeyCaptureActive = false
+  hotkeyMessage = result.message
+
+  if (result.success) {
+    hotkey = copyHotkey(nextHotkey)
+    saveSettings()
+    console.info(`[hotkey] Changed to ${formatHotkey(hotkey)}`)
+  }
+
+  broadcastState()
+  return result
+}
+
+function resetHotkey(): HotkeyActionResult {
+  return setHotkey(copyHotkey(DEFAULT_HOTKEY))
+}
+
 function addVocabularyTerm(value: string): boolean {
   const term = normalizeVocabularyTerm(value)
   if (!term || developerVocabulary.length >= MAX_VOCABULARY_TERMS) return false
@@ -316,7 +398,7 @@ function removeVocabularyTerm(value: string): boolean {
 }
 
 function saveSettings(): void {
-  settingsStore?.save({ processingMode, autoPaste, developerVocabulary, aggregateMetrics })
+  settingsStore?.save({ processingMode, autoPaste, developerVocabulary, aggregateMetrics, hotkey })
 }
 
 function clearRecordingDeliveryTimer(): void {
@@ -450,7 +532,7 @@ async function ensureMicrophonePermission(): Promise<boolean> {
 }
 
 async function startListening(source: string): Promise<void> {
-  if (listening || pendingStartToken !== null) return
+  if (listening || pendingStartToken !== null || hotkeyCaptureActive) return
 
   const token = ++transitionToken
   pendingStartToken = token
@@ -640,6 +722,30 @@ function installIpcHandlers(): void {
     if (event.sender.id !== settingsWindow?.webContents.id || typeof term !== 'string') return false
     return removeVocabularyTerm(term)
   })
+  ipcMain.handle(IPC.beginHotkeyCapture, (event) => {
+    if (event.sender.id !== settingsWindow?.webContents.id) {
+      return { success: false, message: 'Shortcut capture is only available in Settings.' }
+    }
+    return beginHotkeyCapture()
+  })
+  ipcMain.handle(IPC.cancelHotkeyCapture, (event) => {
+    if (event.sender.id !== settingsWindow?.webContents.id) {
+      return { success: false, message: 'Shortcut capture is only available in Settings.' }
+    }
+    return cancelHotkeyCapture()
+  })
+  ipcMain.handle(IPC.setHotkey, (event, value: unknown) => {
+    if (event.sender.id !== settingsWindow?.webContents.id) {
+      return { success: false, message: 'Shortcut changes are only available in Settings.' }
+    }
+    return setHotkey(value)
+  })
+  ipcMain.handle(IPC.resetHotkey, (event) => {
+    if (event.sender.id !== settingsWindow?.webContents.id) {
+      return { success: false, message: 'Shortcut changes are only available in Settings.' }
+    }
+    return resetHotkey()
+  })
 
   ipcMain.handle(IPC.transcribeRecording, async (event, payload: unknown) => {
     if (event.sender.id !== settingsWindow?.webContents.id) {
@@ -689,6 +795,7 @@ app.whenReady().then(() => {
   autoPaste = savedSettings.autoPaste
   developerVocabulary = savedSettings.developerVocabulary
   aggregateMetrics = savedSettings.aggregateMetrics
+  hotkey = savedSettings.hotkey
   console.info(`[mode] ${processingMode}`)
   console.info(`[auto-paste] ${autoPaste ? 'on' : 'off'}`)
   console.info(`[vocabulary] ${developerVocabulary.length} terms loaded`)
@@ -700,6 +807,7 @@ app.whenReady().then(() => {
   configureMediaPermissions()
 
   hotkeyService = new HotkeyService({
+    shortcut: hotkey,
     onPressed: () => void startListening('hotkey press'),
     onReleased: () => stopListening('hotkey release'),
     onToggle: () => void toggleListening('hotkey toggle')

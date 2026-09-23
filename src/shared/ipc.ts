@@ -1,9 +1,15 @@
+import type { HotkeyConfig } from './hotkey'
+
 export const IPC = {
   getAppState: 'voca:get-app-state',
   listeningChanged: 'voca:listening-changed',
   toggleListening: 'voca:toggle-listening',
   addVocabularyTerm: 'voca:add-vocabulary-term',
   removeVocabularyTerm: 'voca:remove-vocabulary-term',
+  beginHotkeyCapture: 'voca:begin-hotkey-capture',
+  cancelHotkeyCapture: 'voca:cancel-hotkey-capture',
+  setHotkey: 'voca:set-hotkey',
+  resetHotkey: 'voca:reset-hotkey',
   transcribeRecording: 'voca:transcribe-recording',
   recordingError: 'voca:recording-error'
 } as const
@@ -42,6 +48,7 @@ export interface AppState {
   listening: boolean
   hotkeyMode: HotkeyMode
   hotkeyMessage: string
+  hotkey: HotkeyConfig
   microphoneStatus: string
   processingMode: ProcessingMode
   autoPaste: boolean

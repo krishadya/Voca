@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
 import type { AppState } from '../../shared/ipc'
+import { DEFAULT_HOTKEY, formatHotkey, validateHotkey } from '../../shared/hotkey'
+import type { HotkeyConfig, HotkeyKey, HotkeyModifier } from '../../shared/hotkey'
 import { AudioRecorder } from './AudioRecorder'
 
 const initialState: AppState = {
   listening: false,
   hotkeyMode: 'toggle',
   hotkeyMessage: 'Starting keyboard shortcut…',
+  hotkey: DEFAULT_HOTKEY,
   microphoneStatus: 'unknown',
   processingMode: 'clean',
   autoPaste: true,
@@ -20,6 +23,26 @@ const initialState: AppState = {
   recordingSessionId: 0,
   overlayPhase: 'hidden',
   overlayText: ''
+}
+
+function hotkeyKeyFromCode(code: string): HotkeyKey | null {
+  if (/^F(?:[1-9]|1[0-2])$/.test(code)) return code as HotkeyKey
+  if (code === 'Space') return 'Space'
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3) as HotkeyKey
+  return null
+}
+
+function isModifierCode(code: string): boolean {
+  return /^(?:Meta|Control|Alt|Shift)(?:Left|Right)$/.test(code)
+}
+
+function modifiersFromEvent(event: KeyboardEvent): HotkeyModifier[] {
+  const modifiers: HotkeyModifier[] = []
+  if (event.metaKey) modifiers.push('Command')
+  if (event.ctrlKey) modifiers.push('Control')
+  if (event.altKey) modifiers.push('Option')
+  if (event.shiftKey) modifiers.push('Shift')
+  return modifiers
 }
 
 function useVocaState(): AppState {
@@ -92,6 +115,8 @@ function Overlay({ state }: { state: AppState }): React.JSX.Element {
 
 function Settings({ state }: { state: AppState }): React.JSX.Element {
   const [vocabularyTerm, setVocabularyTerm] = useState('')
+  const [shortcutCaptureActive, setShortcutCaptureActive] = useState(false)
+  const [shortcutFeedback, setShortcutFeedback] = useState('')
   const permissionLabel =
     state.microphoneStatus === 'granted'
       ? 'Microphone ready'
@@ -113,6 +138,94 @@ function Settings({ state }: { state: AppState }): React.JSX.Element {
     const added = await window.voca.addVocabularyTerm(term)
     if (added) setVocabularyTerm('')
   }
+
+  const cancelShortcutCapture = async (): Promise<void> => {
+    setShortcutCaptureActive(false)
+    const result = await window.voca.cancelHotkeyCapture()
+    setShortcutFeedback(result.success ? 'Shortcut change canceled.' : result.message)
+  }
+
+  const toggleShortcutCapture = async (): Promise<void> => {
+    if (shortcutCaptureActive) {
+      await cancelShortcutCapture()
+      return
+    }
+
+    const result = await window.voca.beginHotkeyCapture()
+    if (result.success) {
+      setShortcutCaptureActive(true)
+      setShortcutFeedback('Press your new shortcut…')
+    } else {
+      setShortcutFeedback(result.message)
+    }
+  }
+
+  const resetShortcut = async (): Promise<void> => {
+    setShortcutCaptureActive(false)
+    const result = await window.voca.resetHotkey()
+    setShortcutFeedback(result.success ? 'Shortcut reset to F8.' : result.message)
+  }
+
+  useEffect(() => {
+    if (!shortcutCaptureActive) return
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      event.preventDefault()
+      event.stopPropagation()
+      if (event.repeat) return
+
+      if (event.code === 'Escape') {
+        void cancelShortcutCapture()
+        return
+      }
+
+      if (isModifierCode(event.code)) {
+        setShortcutFeedback('Add a non-modifier key to complete the shortcut.')
+        return
+      }
+
+      const key = hotkeyKeyFromCode(event.code)
+      if (!key) {
+        setShortcutFeedback('Use F1–F12, Space, or a letter key.')
+        return
+      }
+
+      const candidate: HotkeyConfig = {
+        key,
+        modifiers: modifiersFromEvent(event)
+      }
+      const validationError = validateHotkey(candidate)
+      if (validationError) {
+        setShortcutFeedback(validationError)
+        return
+      }
+
+      setShortcutCaptureActive(false)
+      setShortcutFeedback(`Applying ${formatHotkey(candidate)}…`)
+      void window.voca.setHotkey(candidate).then((result) => {
+        setShortcutFeedback(
+          result.success ? `Shortcut changed to ${formatHotkey(candidate)}.` : result.message
+        )
+      })
+    }
+
+    const handleBlur = (): void => {
+      void cancelShortcutCapture()
+    }
+
+    window.addEventListener('keydown', handleKeyDown, true)
+    window.addEventListener('blur', handleBlur)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true)
+      window.removeEventListener('blur', handleBlur)
+    }
+  }, [shortcutCaptureActive])
+
+  useEffect(() => {
+    return () => {
+      void window.voca.cancelHotkeyCapture()
+    }
+  }, [])
 
   return (
     <main className="settings-shell">
@@ -155,7 +268,11 @@ function Settings({ state }: { state: AppState }): React.JSX.Element {
           </div>
         </div>
 
-        <button type="button" onClick={() => void window.voca.toggleListening()}>
+        <button
+          type="button"
+          onClick={() => void window.voca.toggleListening()}
+          disabled={shortcutCaptureActive}
+        >
           {state.listening ? 'Stop Listening' : 'Start Listening'}
         </button>
       </section>
@@ -164,7 +281,7 @@ function Settings({ state }: { state: AppState }): React.JSX.Element {
         <article>
           <p className="detail-heading">Shortcut</p>
           <p className="keycap-row">
-            <kbd>F8</kbd>
+            <kbd>{formatHotkey(state.hotkey)}</kbd>
           </p>
           <p>{state.hotkeyMode === 'hold' ? 'Hold to talk' : 'Toggle mode'}</p>
         </article>
@@ -173,6 +290,45 @@ function Settings({ state }: { state: AppState }): React.JSX.Element {
           <p className="permission-state">{permissionLabel}</p>
           <p>Audio is sent to Groq after recording</p>
         </article>
+      </section>
+
+      <section
+        className={`settings-section shortcut-section ${shortcutCaptureActive ? 'is-capturing' : ''}`}
+        aria-labelledby="shortcut-heading"
+      >
+        <div className="section-heading-row">
+          <div>
+            <h2 id="shortcut-heading">Push-to-Talk Shortcut</h2>
+            <p>Hold the shortcut to listen and release it to stop.</p>
+          </div>
+        </div>
+
+        <div className="shortcut-display" aria-live="polite">
+          <kbd>{shortcutCaptureActive ? 'Press your new shortcut…' : formatHotkey(state.hotkey)}</kbd>
+        </div>
+
+        <div className="shortcut-actions">
+          <button
+            type="button"
+            className="primary-action"
+            onClick={() => void toggleShortcutCapture()}
+            disabled={state.listening}
+          >
+            {shortcutCaptureActive ? 'Cancel' : 'Change Shortcut'}
+          </button>
+          <button
+            type="button"
+            className="secondary-action"
+            onClick={() => void resetShortcut()}
+            disabled={state.listening || (!shortcutCaptureActive && formatHotkey(state.hotkey) === 'F8')}
+          >
+            Reset to F8
+          </button>
+        </div>
+
+        <p className={`shortcut-feedback ${shortcutFeedback ? 'has-message' : ''}`} role="status">
+          {shortcutFeedback || 'Supports F1–F12 and modified Space or letter keys.'}
+        </p>
       </section>
 
       <section className="settings-section" aria-labelledby="vocabulary-heading">
