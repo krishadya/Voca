@@ -288,7 +288,8 @@ footer {
   animation-duration: 1.8s;
 }
 
-.phase-transcript .pulse-dot {
+.phase-transcript .pulse-dot,
+.phase-pasted .pulse-dot {
   background: #62d995;
   animation: none;
   box-shadow: 0 0 0 5px rgba(98, 217, 149, 0.12);
@@ -338,6 +339,7 @@ footer {
 }
 
 .result-mark,
+.copy-mark,
 .error-mark {
   display: grid;
   flex: 0 0 auto;
@@ -352,6 +354,13 @@ footer {
 .result-mark {
   color: #9aefbc;
   background: rgba(98, 217, 149, 0.12);
+}
+
+.copy-mark {
+  width: 38px;
+  color: #d2baf8;
+  background: rgba(165, 120, 241, 0.12);
+  font-size: 11px;
 }
 
 .error-mark {

@@ -16,6 +16,7 @@ This milestone includes transcription and lightweight text processing. It does n
 - Groq speech-to-text using `whisper-large-v3-turbo`
 - Optional Gemini processing using `gemini-3.5-flash-lite`
 - Raw, Clean, and Dev Prompt modes selected from the menu bar
+- Optional automatic insertion into the currently focused macOS text field
 - Non-focusable overlay with Listening, Transcribing, Processing, result, and failure states
 
 ## Install and run
@@ -42,6 +43,16 @@ Choose **Mode** from the Voca menu-bar menu:
 - **Dev Prompt** turns spoken developer intent into a concise coding-agent prompt without adding requirements.
 
 The selected mode is saved in Voca's local Electron user-data directory and restored at the next launch.
+
+## Auto Paste
+
+**Auto Paste** is enabled by default in the Voca menu-bar menu and is saved between launches.
+
+- When enabled, Voca snapshots the clipboard, puts the final text on it, sends Command+V through the native input hook, and restores the previous clipboard after a short delay.
+- When disabled, Voca copies the final text and shows **Copied — paste manually** without sending Command+V.
+- If Accessibility permission is unavailable or insertion throws an error, Voca falls back to the same copy-only behavior.
+
+The overlay is non-focusable, so the application and text field active when recording begins remain focused during transcription and processing.
 
 Other useful commands:
 
@@ -78,4 +89,9 @@ Voca continues to work without Accessibility/Input Monitoring access: F8 switche
 - English is fixed as the transcription language for now.
 - Groq currently accepts direct uploads up to 25 MB on its free tier; Voca rejects larger recordings.
 - Clean and Dev Prompt require network access and a valid Gemini API key. Raw mode requires only Groq.
-- Final output stays visible for roughly 4.5–12 seconds based on its length, then disappears without being saved.
+- Successful automatic insertion briefly shows **Pasted**. Copy-only results stay visible for roughly 7–15 seconds, then disappear without being saved.
+- Auto Paste requires macOS Accessibility permission. Depending on macOS, Input Monitoring may also be required by the native hook.
+- Voca restores clipboard formats that Electron can read and materialize. Platform-specific or application-private clipboard formats may not be restorable.
+- Clipboard restoration is skipped if the clipboard changes during the paste delay, preventing Voca from overwriting a newer user copy operation.
+- Voca cannot reliably detect a target application that accepts Command+V but ignores the paste. In that rare case the operation may still be reported as pasted.
+- Because Voca never takes focus, insertion normally returns to the original field. If the user deliberately switches apps or moves focus while processing, Command+V goes to the newly focused field.

@@ -8,6 +8,7 @@ const initialState: AppState = {
   hotkeyMessage: 'Starting keyboard shortcut…',
   microphoneStatus: 'unknown',
   processingMode: 'clean',
+  autoPaste: true,
   recordingSessionId: 0,
   overlayPhase: 'hidden',
   overlayText: ''
@@ -41,6 +42,10 @@ function Overlay({ state }: { state: AppState }): React.JSX.Element {
       ? 'Transcribing…'
       : state.overlayPhase === 'processing'
         ? 'Processing…'
+        : state.overlayPhase === 'pasted'
+          ? state.overlayText || 'Pasted'
+          : state.overlayPhase === 'copied'
+            ? state.overlayText
         : state.overlayPhase === 'transcript'
           ? state.overlayText
           : state.overlayPhase === 'error'
@@ -55,12 +60,22 @@ function Overlay({ state }: { state: AppState }): React.JSX.Element {
             <span className="pulse-dot" />
             <span className="brand-label">VOCA</span>
           </div>
-          <p className={state.overlayPhase === 'transcript' ? 'transcript-text' : ''}>{message}</p>
+          <p
+            className={
+              state.overlayPhase === 'transcript' || state.overlayPhase === 'copied'
+                ? 'transcript-text'
+                : ''
+            }
+          >
+            {message}
+          </p>
         </div>
         {state.overlayPhase === 'listening' && <ListeningBars />}
         {state.overlayPhase === 'transcribing' && <ListeningBars transcribing />}
         {state.overlayPhase === 'processing' && <ListeningBars transcribing />}
         {state.overlayPhase === 'transcript' && <span className="result-mark">✓</span>}
+        {state.overlayPhase === 'pasted' && <span className="result-mark">✓</span>}
+        {state.overlayPhase === 'copied' && <span className="copy-mark">⌘V</span>}
         {state.overlayPhase === 'error' && <span className="error-mark">!</span>}
       </section>
     </main>
@@ -141,7 +156,7 @@ function Settings({ state }: { state: AppState }): React.JSX.Element {
         {state.processingMode === 'dev-prompt'
           ? 'Dev Prompt'
           : state.processingMode[0].toUpperCase() + state.processingMode.slice(1)}{' '}
-        · Recordings are not saved by Voca.
+        · Auto Paste {state.autoPaste ? 'On' : 'Off'} · Recordings are not saved by Voca.
       </footer>
     </main>
   )

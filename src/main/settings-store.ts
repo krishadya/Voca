@@ -2,39 +2,54 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { ProcessingMode } from '../shared/ipc'
 
-const DEFAULT_MODE: ProcessingMode = 'clean'
+export interface AppSettings {
+  processingMode: ProcessingMode
+  autoPaste: boolean
+}
+
+const DEFAULT_SETTINGS: AppSettings = {
+  processingMode: 'clean',
+  autoPaste: true
+}
 
 function isProcessingMode(value: unknown): value is ProcessingMode {
   return value === 'raw' || value === 'clean' || value === 'dev-prompt'
 }
 
-export class ModeSettingsStore {
+export class SettingsStore {
   constructor(private readonly filePath: string) {}
 
-  load(): ProcessingMode {
+  load(): AppSettings {
     try {
       const settings = JSON.parse(readFileSync(this.filePath, 'utf8')) as {
         processingMode?: unknown
+        autoPaste?: unknown
       }
-      return isProcessingMode(settings.processingMode) ? settings.processingMode : DEFAULT_MODE
+      return {
+        processingMode: isProcessingMode(settings.processingMode)
+          ? settings.processingMode
+          : DEFAULT_SETTINGS.processingMode,
+        autoPaste:
+          typeof settings.autoPaste === 'boolean' ? settings.autoPaste : DEFAULT_SETTINGS.autoPaste
+      }
     } catch (error) {
       const code = error instanceof Error && 'code' in error ? error.code : undefined
-      if (code !== 'ENOENT') console.warn('[settings] Could not load saved mode:', error)
-      return DEFAULT_MODE
+      if (code !== 'ENOENT') console.warn('[settings] Could not load saved settings:', error)
+      return { ...DEFAULT_SETTINGS }
     }
   }
 
-  save(processingMode: ProcessingMode): void {
+  save(settings: AppSettings): void {
     try {
       mkdirSync(dirname(this.filePath), { recursive: true })
       const temporaryPath = `${this.filePath}.tmp`
-      writeFileSync(temporaryPath, `${JSON.stringify({ processingMode }, null, 2)}\n`, {
+      writeFileSync(temporaryPath, `${JSON.stringify(settings, null, 2)}\n`, {
         encoding: 'utf8',
         mode: 0o600
       })
       renameSync(temporaryPath, this.filePath)
     } catch (error) {
-      console.error('[settings] Could not save selected mode:', error)
+      console.error('[settings] Could not save settings:', error)
     }
   }
 }

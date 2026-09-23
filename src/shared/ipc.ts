@@ -14,6 +14,8 @@ export type OverlayPhase =
   | 'transcribing'
   | 'processing'
   | 'transcript'
+  | 'pasted'
+  | 'copied'
   | 'error'
 
 export interface AppState {
@@ -22,6 +24,7 @@ export interface AppState {
   hotkeyMessage: string
   microphoneStatus: string
   processingMode: ProcessingMode
+  autoPaste: boolean
   recordingSessionId: number
   overlayPhase: OverlayPhase
   overlayText: string

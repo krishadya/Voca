@@ -14,7 +14,8 @@ import {
 import { HotkeyService } from './hotkey-service'
 import { GroqTranscriptionService } from './groq-transcription-service'
 import { GeminiProcessingService } from './gemini-processing-service'
-import { ModeSettingsStore } from './mode-settings-store'
+import { SettingsStore } from './settings-store'
+import { TextInsertionService } from './text-insertion-service'
 import { createTrayImage } from './tray-icon'
 import { IPC } from '../shared/ipc'
 import type {
@@ -39,12 +40,13 @@ const ERROR_DISPLAY_MS = 2_200
 
 const transcriptionService = new GroqTranscriptionService(process.env.GROQ_API_KEY)
 const geminiProcessingService = new GeminiProcessingService(process.env.GEMINI_API_KEY)
+const textInsertionService = new TextInsertionService()
 
 let settingsWindow: BrowserWindow | null = null
 let overlayWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let hotkeyService: HotkeyService | null = null
-let modeSettingsStore: ModeSettingsStore | null = null
+let settingsStore: SettingsStore | null = null
 let listening = false
 let pendingStartToken: number | null = null
 let transitionToken = 0
@@ -52,7 +54,10 @@ let hotkeyMode: HotkeyMode = 'toggle'
 let hotkeyMessage = 'Starting keyboard shortcut…'
 let microphoneStatus = 'unknown'
 let processingMode: ProcessingMode = 'clean'
+let autoPaste = true
 let recordingProcessingMode: ProcessingMode = 'clean'
+let recordingAutoPaste = true
+let recordingHasExternalTarget = true
 let recordingSessionId = 0
 let overlayPhase: OverlayPhase = 'hidden'
 let overlayText = ''
@@ -151,6 +156,7 @@ function currentState(): AppState {
     hotkeyMessage,
     microphoneStatus,
     processingMode,
+    autoPaste,
     recordingSessionId,
     overlayPhase,
     overlayText
@@ -190,6 +196,12 @@ function updateTrayMenu(): void {
             click: () => setProcessingMode('dev-prompt')
           }
         ]
+      },
+      {
+        label: 'Auto Paste',
+        type: 'checkbox',
+        checked: autoPaste,
+        click: () => setAutoPaste(!autoPaste)
       },
       { label: 'Settings…', click: showSettings },
       { type: 'separator' },
@@ -234,9 +246,21 @@ function positionOverlay(): void {
 function setProcessingMode(mode: ProcessingMode): void {
   if (processingMode === mode) return
   processingMode = mode
-  modeSettingsStore?.save(mode)
+  saveSettings()
   console.info(`[mode] ${mode}`)
   broadcastState()
+}
+
+function setAutoPaste(enabled: boolean): void {
+  if (autoPaste === enabled) return
+  autoPaste = enabled
+  saveSettings()
+  console.info(`[auto-paste] ${enabled ? 'on' : 'off'}`)
+  broadcastState()
+}
+
+function saveSettings(): void {
+  settingsStore?.save({ processingMode, autoPaste })
 }
 
 function clearRecordingDeliveryTimer(): void {
@@ -260,7 +284,7 @@ function setOverlay(phase: OverlayPhase, text = ''): void {
   if (phase === 'hidden') {
     overlayWindow?.hide()
   } else {
-    const isResult = phase === 'transcript'
+    const isResult = phase === 'transcript' || phase === 'copied'
     overlayWindow?.setSize(
       isResult ? RESULT_OVERLAY_WIDTH : COMPACT_OVERLAY_WIDTH,
       isResult ? RESULT_OVERLAY_HEIGHT : COMPACT_OVERLAY_HEIGHT,
@@ -311,6 +335,8 @@ function setListening(next: boolean, source: string): void {
     clearOverlayHideTimer()
     recordingSessionId += 1
     recordingProcessingMode = processingMode
+    recordingAutoPaste = autoPaste
+    recordingHasExternalTarget = BrowserWindow.getFocusedWindow() === null
     setOverlay('listening')
   } else {
     const stoppedSessionId = recordingSessionId
@@ -445,7 +471,33 @@ async function transcribeRecording(payload: RecordingPayload): Promise<void> {
 
     console.info(`[output:${recordingProcessingMode}] ${finalOutput}`)
     setOverlay('transcript', finalOutput)
-    const displayTimeMs = Math.min(12_000, Math.max(4_500, finalOutput.length * 35))
+
+    const insertionResult = await textInsertionService.insert(
+      finalOutput,
+      recordingAutoPaste && recordingHasExternalTarget
+    )
+
+    if (payload.sessionId !== recordingSessionId || listening) return
+
+    if (insertionResult.status === 'pasted') {
+      console.info(
+        `[insertion] Pasted; clipboard ${insertionResult.clipboardRestored ? 'restored' : 'not restored'}`
+      )
+      setOverlay('pasted', 'Pasted')
+      scheduleOverlayHide(payload.sessionId, 1_400)
+      return
+    }
+
+    if (insertionResult.error) {
+      console.error('[insertion] Auto-paste unavailable:', insertionResult.error)
+    }
+
+    const copiedMessage =
+      insertionResult.status === 'copied'
+        ? `Copied — paste manually\n\n${finalOutput}`
+        : `Copy failed — final text:\n\n${finalOutput}`
+    setOverlay('copied', copiedMessage)
+    const displayTimeMs = Math.min(15_000, Math.max(7_000, finalOutput.length * 40))
     scheduleOverlayHide(payload.sessionId, displayTimeMs)
   } catch (error) {
     showOperationFailure(payload.sessionId, error)
@@ -498,9 +550,12 @@ app.whenReady().then(() => {
   app.setName('Voca')
   app.dock?.hide()
 
-  modeSettingsStore = new ModeSettingsStore(join(app.getPath('userData'), 'settings.json'))
-  processingMode = modeSettingsStore.load()
+  settingsStore = new SettingsStore(join(app.getPath('userData'), 'settings.json'))
+  const savedSettings = settingsStore.load()
+  processingMode = savedSettings.processingMode
+  autoPaste = savedSettings.autoPaste
   console.info(`[mode] ${processingMode}`)
+  console.info(`[auto-paste] ${autoPaste ? 'on' : 'off'}`)
 
   settingsWindow = createSettingsWindow()
   overlayWindow = createOverlayWindow()
