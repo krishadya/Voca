@@ -41,6 +41,7 @@ import {
   copyHotkey,
   DEFAULT_HOTKEY,
   formatHotkey,
+  HOTKEY_USAGE_GUIDANCE,
   normalizeHotkey,
   validateHotkey
 } from '../shared/hotkey'
@@ -374,13 +375,13 @@ function setHotkey(value: unknown): HotkeyActionResult {
   }
 
   const nextHotkey = normalizeHotkey(value)
-  const validationError = nextHotkey ? validateHotkey(nextHotkey) : 'That shortcut is not supported.'
+  const validationError = nextHotkey ? validateHotkey(nextHotkey) : HOTKEY_USAGE_GUIDANCE
 
   if (!nextHotkey || validationError) {
     const resumeResult = cancelHotkeyCapture()
     return {
       success: false,
-      message: resumeResult.success ? validationError ?? 'That shortcut is not supported.' : resumeResult.message
+      message: resumeResult.success ? validationError ?? HOTKEY_USAGE_GUIDANCE : resumeResult.message
     }
   }
 

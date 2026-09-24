@@ -60,6 +60,10 @@ export const DEFAULT_HOTKEY: HotkeyConfig = {
   modifiers: []
 }
 
+export const HOTKEY_USAGE_GUIDANCE = 'Use an F-key or a shortcut with ⌘, ⌥, ⌃, or ⇧.'
+export const HOTKEY_LIMITATION_NOTE =
+  'Fn/Globe and multi-key chords such as Space + P are not supported.'
+
 const RESERVED_SHORTCUTS = new Set([
   'Command+Space',
   'Command+Option+Space',
@@ -102,12 +106,12 @@ function signature(hotkey: HotkeyConfig): string {
 }
 
 export function validateHotkey(hotkey: HotkeyConfig): string | null {
-  if (!isHotkeyKey(hotkey.key)) return 'That key is not supported.'
-  if (!hotkey.modifiers.every(isHotkeyModifier)) return 'That modifier is not supported.'
+  if (!isHotkeyKey(hotkey.key)) return HOTKEY_USAGE_GUIDANCE
+  if (!hotkey.modifiers.every(isHotkeyModifier)) return HOTKEY_USAGE_GUIDANCE
 
   const isFunctionKey = /^F(?:[1-9]|1[0-2])$/.test(hotkey.key)
   if (!isFunctionKey && hotkey.modifiers.length === 0) {
-    return 'Letters and Space require at least one modifier.'
+    return HOTKEY_USAGE_GUIDANCE
   }
 
   if (RESERVED_SHORTCUTS.has(signature(hotkey))) {
