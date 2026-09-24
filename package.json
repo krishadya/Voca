@@ -27,6 +27,7 @@
       "node_modules/uiohook-napi/**/*"
     ],
     "mac": {
+      "icon": "build/voca.icns",
       "category": "public.app-category.productivity",
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
