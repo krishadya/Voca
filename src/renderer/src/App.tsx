@@ -5,7 +5,13 @@ import type {
   ProviderConnectionState,
   ProviderId
 } from '../../shared/ipc'
-import { DEFAULT_HOTKEY, formatHotkey, validateHotkey } from '../../shared/hotkey'
+import {
+  DEFAULT_HOTKEY,
+  formatHotkey,
+  HOTKEY_LIMITATION_NOTE,
+  HOTKEY_USAGE_GUIDANCE,
+  validateHotkey
+} from '../../shared/hotkey'
 import type { HotkeyConfig, HotkeyKey, HotkeyModifier } from '../../shared/hotkey'
 import vocaMarkUrl from './assets/voca-mark.svg'
 import { AudioRecorder } from './AudioRecorder'
@@ -212,7 +218,7 @@ function ShortcutEditor({ state }: { state: AppState }): React.JSX.Element {
       }
       const key = hotkeyKeyFromCode(event.code)
       if (!key) {
-        setFeedback('Use F1–F12, Space, or a letter key.')
+        setFeedback(HOTKEY_USAGE_GUIDANCE)
         return
       }
       const candidate: HotkeyConfig = { key, modifiers: modifiersFromEvent(event) }
@@ -243,8 +249,9 @@ function ShortcutEditor({ state }: { state: AppState }): React.JSX.Element {
       <div className="preference-icon"><Icon name="general" /></div>
       <div className="preference-copy">
         <strong>Push-to-Talk Shortcut</strong>
-        <span>Hold the shortcut to listen and release to stop.</span>
-        {feedback && <small role="status">{feedback}</small>}
+        <span>{HOTKEY_USAGE_GUIDANCE}</span>
+        <small className="shortcut-support-note">{HOTKEY_LIMITATION_NOTE}</small>
+        {feedback && <small className="shortcut-feedback" role="status">{feedback}</small>}
       </div>
       <div className="shortcut-control">
         <kbd>{captureActive ? 'Press your new shortcut…' : formatHotkey(state.hotkey)}</kbd>

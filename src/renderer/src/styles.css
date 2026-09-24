@@ -300,6 +300,8 @@ kbd {
 .preference-copy strong { display: block; font-size: 12px; font-weight: 620; }
 .preference-copy span { display: block; margin-top: 3px; font-size: 12px; }
 .preference-copy small { display: block; margin-top: 5px; color: var(--accent); font-size: 9px; }
+.preference-copy .shortcut-support-note { margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.preference-copy .shortcut-feedback { color: var(--accent); }
 
 .shortcut-card.is-capturing { background: rgba(232, 188, 104, 0.035); }
 .shortcut-control { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 7px; }
