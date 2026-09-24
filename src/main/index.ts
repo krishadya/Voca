@@ -58,7 +58,9 @@ import type {
   ProviderId
 } from '../shared/ipc'
 
-loadEnvironment({ path: join(process.cwd(), '.env'), quiet: true })
+if (!app.isPackaged) {
+  loadEnvironment({ path: join(process.cwd(), '.env'), quiet: true })
+}
 
 const COMPACT_OVERLAY_WIDTH = 410
 const COMPACT_OVERLAY_HEIGHT = 92
@@ -686,7 +688,7 @@ async function transcribeRecording(payload: RecordingPayload): Promise<void> {
 
     if (payload.sessionId !== recordingSessionId || listening) return
 
-    console.info(`[transcription:raw] ${rawTranscript}`)
+    if (!app.isPackaged) console.info(`[transcription:raw] ${rawTranscript}`)
 
     let finalOutput = rawTranscript
     let processingLatencyMs = 0
@@ -738,7 +740,7 @@ async function transcribeRecording(payload: RecordingPayload): Promise<void> {
       if (!app.isPackaged) logRecordingMetrics(recordingMetrics)
     }
 
-    console.info(`[output:${recordingProcessingMode}] ${finalOutput}`)
+    if (!app.isPackaged) console.info(`[output:${recordingProcessingMode}] ${finalOutput}`)
     setOverlay('transcript', finalOutput)
 
     const insertionResult = await textInsertionService.insert(
