@@ -161,11 +161,20 @@ function DetailedOverlay({ state }: { state: AppState }): React.JSX.Element {
 
 function MinimalOverlay({ state }: { state: AppState }): React.JSX.Element {
   const listening = state.overlayPhase === 'listening'
+  const success = state.overlayPhase === 'pasted' || state.overlayPhase === 'transcript'
+  const visualState = listening ? 'listening' : success ? 'success' : 'processing'
   return (
-    <main className="overlay-shell" aria-label={listening ? 'Voca is listening' : 'Voca is processing'}>
+    <main
+      className="overlay-shell"
+      aria-label={listening ? 'Voca is listening' : success ? 'Voca completed' : 'Voca is processing'}
+    >
       <section className="minimal-overlay">
-        <div className="minimal-overlay-state" key={listening ? 'listening' : 'processing'}>
-          {listening ? <ListeningBars /> : <span className="processing-spinner" />}
+        <div className="minimal-overlay-state" key={visualState}>
+          {listening
+            ? <ListeningBars />
+            : success
+              ? <span className="success-indicator">✓</span>
+              : <span className="processing-spinner" />}
         </div>
       </section>
     </main>
