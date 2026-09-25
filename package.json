@@ -1,6 +1,6 @@
 {
   "name": "voca",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A macOS-first push-to-talk desktop voice tool.",
   "main": "./out/main/index.js",
   "author": "Voca",
