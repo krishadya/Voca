@@ -27,7 +27,7 @@
 </p>
 
 <p align="center">
-  <a href="LANDING_PAGE_URL"><strong>Website</strong></a>
+  <a href="https://krishadya.github.io/Voca/"><strong>Website</strong></a>
   ·
   <a href="https://github.com/krishadya/Voca/releases/latest"><strong>Download</strong></a>
   ·
