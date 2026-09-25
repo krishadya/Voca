@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voca — Voice to intent, instantly.</title>
+    <meta
+      name="description"
+      content="Voca is a macOS voice-to-intent utility that turns natural speech into clean text and context-aware developer prompts."
+    >
+    <meta name="theme-color" content="#0d0d0e">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Voca — Voice to intent, instantly.">
+    <meta
+      property="og:description"
+      content="Turn natural speech into clean text and context-aware developer prompts, then insert the result into the app already in focus."
+    >
+    <meta property="og:url" content="https://krishadya.github.io/Voca/">
+    <meta property="og:image" content="https://krishadya.github.io/Voca/assets/voca-hero.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="icon" type="image/png" href="assets/voca-icon.png">
+    <link rel="apple-touch-icon" href="assets/voca-icon.png">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="nav shell" aria-label="Primary navigation">
+        <a class="brand" href="#top" aria-label="Voca home">
+          <img src="assets/voca-icon.png" width="44" height="44" alt="">
+          <span>Voca</span>
+        </a>
+        <div class="nav-links">
+          <a class="nav-secondary" href="#features">Features</a>
+          <a class="nav-secondary" href="#how-it-works">How it works</a>
+          <a class="nav-secondary" href="#privacy">Privacy</a>
+          <a href="https://github.com/krishadya/Voca">GitHub</a>
+          <a class="nav-download" href="https://github.com/krishadya/Voca/releases/latest">Download</a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero section" id="top">
+        <div class="hero-grid shell">
+          <div class="hero-copy">
+            <div class="eyebrow">
+              <img src="assets/voca-icon.png" width="50" height="50" alt="Voca app icon">
+              <span>macOS voice-to-intent for developers</span>
+            </div>
+            <h1>Voice to intent,<br><span>instantly.</span></h1>
+            <p class="hero-lede">
+              Speak naturally. Voca turns your voice into clean text or context-aware developer
+              prompts and inserts the result directly into the app you're already using.
+            </p>
+            <div class="hero-actions" aria-label="Download and project links">
+              <a class="button button-primary" href="https://github.com/krishadya/Voca/releases/latest">
+                Download Voca
+                <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M10 3v10m0 0 4-4m-4 4L6 9M4 16h12"/></svg>
+              </a>
+              <a class="button button-secondary" href="https://github.com/krishadya/Voca">
+                View on GitHub
+              </a>
+            </div>
+            <p class="release-meta">macOS <span>·</span> Apple Silicon <span>·</span> v0.1.1</p>
+          </div>
+
+          <figure class="hero-media media-frame">
+            <img
+              src="assets/voca-hero.png"
+              width="1750"
+              height="1356"
+              alt="Voca settings showing push-to-talk, modes, automatic paste, and overlay controls"
+            >
+          </figure>
+        </div>
+      </section>
+
+      <section class="proposition section-compact" aria-labelledby="proposition-title">
+        <div class="narrow centered">
+          <p class="section-kicker">Built beyond basic dictation</p>
+          <h2 id="proposition-title">Dictation captures words. <span>Voca captures intent.</span></h2>
+          <p>
+            Use Raw mode for direct transcription, Clean mode for polished writing, or Dev Prompt
+            mode to turn natural speech and surrounding context into a focused instruction for your
+            coding agent.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="modes" aria-labelledby="modes-title">
+        <div class="shell">
+          <div class="section-heading">
+            <p class="section-kicker">Three focused modes</p>
+            <h2 id="modes-title">Choose how your voice becomes text.</h2>
+          </div>
+          <div class="mode-grid">
+            <article class="mode-card">
+              <div class="mode-number">01</div>
+              <p class="mode-label">Raw</p>
+              <h3>Your speech, transcribed as-is.</h3>
+              <p>Direct transcription from Groq Whisper, without rewriting your words.</p>
+            </article>
+            <article class="mode-card">
+              <div class="mode-number">02</div>
+              <p class="mode-label">Clean</p>
+              <h3>Natural speech, cleaned up.</h3>
+              <p>Gemini removes filler and repetition while preserving your meaning.</p>
+            </article>
+            <article class="mode-card mode-card-featured">
+              <div class="mode-number">03</div>
+              <p class="mode-label">Dev Prompt</p>
+              <h3>Turn what you mean into what your coding agent needs.</h3>
+              <p>Spoken intent, active-app context, and selected text become one structured prompt.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-elevated" id="features" aria-labelledby="features-title">
+        <div class="shell">
+          <div class="section-heading heading-row">
+            <div>
+              <p class="section-kicker">Designed for the way developers work</p>
+              <h2 id="features-title">Useful context. Minimal interruption.</h2>
+            </div>
+            <p>Voca stays in the menu bar, listens only when asked, and returns the result where you need it.</p>
+          </div>
+          <div class="feature-grid">
+            <article class="feature-card">
+              <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 7H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-3M16 5h5v5M10 14 21 3"/></svg></span>
+              <h3>Context-aware prompts</h3>
+              <p>Uses active-app and selected-text context when it helps clarify your request.</p>
+            </article>
+            <article class="feature-card">
+              <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v18M8 7v10M4 10v4M16 7v10M20 10v4"/></svg></span>
+              <h3>Push-to-talk</h3>
+              <p>Hold a configurable global shortcut and speak naturally from any application.</p>
+            </article>
+            <article class="feature-card">
+              <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m14 4 6 6-6 6M20 10H8a4 4 0 0 0-4 4v6"/></svg></span>
+              <h3>Automatic insertion</h3>
+              <p>Pastes the final result directly into the application already in focus.</p>
+            </article>
+            <article class="feature-card">
+              <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2H11v18H7.5A3.5 3.5 0 0 0 4 23.5ZM20 5.5A3.5 3.5 0 0 0 16.5 2H13v18h3.5a3.5 3.5 0 0 1 3.5 3.5Z"/></svg></span>
+              <h3>Developer vocabulary</h3>
+              <p>Teach Voca technical names, tools, libraries, and exact casing.</p>
+            </article>
+            <article class="feature-card">
+              <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 18V9m4 9V5m4 13V8m4 10V3m4 15v-7"/></svg></span>
+              <h3>Minimal or Detailed</h3>
+              <p>Choose a quiet voice indicator or a more informative processing overlay.</p>
+            </article>
+            <article class="feature-card">
+              <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg></span>
+              <h3>Local-first settings</h3>
+              <p>Credentials and preferences stay on your Mac. No Voca account or backend.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section showcase" id="dev-prompt" aria-labelledby="showcase-title">
+        <div class="shell">
+          <div class="showcase-copy">
+            <p class="section-kicker">Dev Prompt</p>
+            <h2 id="showcase-title">Speak the change. Keep the context.</h2>
+            <p>
+              In Dev Prompt mode, Voca combines your spoken request with the active application and
+              selected text when relevant, then turns it into a concise prompt ready for your coding workflow.
+            </p>
+          </div>
+          <figure class="media-frame showcase-media">
+            <img
+              src="assets/voca-dev-prompt.png"
+              width="3840"
+              height="2402"
+              loading="lazy"
+              alt="Voca Dev Prompt mode used alongside a developer editor and coding agent"
+            >
+          </figure>
+        </div>
+      </section>
+
+      <section class="section section-elevated" aria-label="Vocabulary and local statistics">
+        <div class="shell split-showcase">
+          <article>
+            <figure class="media-frame compact-media">
+              <img
+                src="assets/voca-vocabulary.png"
+                width="1750"
+                height="1351"
+                loading="lazy"
+                alt="Voca Developer Vocabulary settings with saved technical terms"
+              >
+            </figure>
+            <p class="section-kicker">Recognition that speaks your language</p>
+            <h2>Developer Vocabulary</h2>
+            <p>Add technical names and exact casing so transcription better reflects the tools and terminology you actually use.</p>
+          </article>
+          <article>
+            <figure class="media-frame compact-media">
+              <img
+                src="assets/voca-stats.png"
+                width="1760"
+                height="1356"
+                loading="lazy"
+                alt="Voca local statistics showing aggregate dictation and latency metrics"
+              >
+            </figure>
+            <p class="section-kicker">Measure without a history trail</p>
+            <h2>Local Stats</h2>
+            <p>Track aggregate dictation counts, word totals, and latency without storing transcript history.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="how-it-works" aria-labelledby="workflow-title">
+        <div class="shell">
+          <div class="section-heading centered">
+            <p class="section-kicker">From voice to active application</p>
+            <h2 id="workflow-title">One shortcut. One continuous flow.</h2>
+          </div>
+          <ol class="workflow" aria-label="Voca processing flow">
+            <li><span>01</span><strong>Voice</strong></li>
+            <li><span>02</span><strong>Transcription</strong></li>
+            <li><span>03</span><strong>Context</strong></li>
+            <li><span>04</span><strong>Intent</strong></li>
+            <li><span>05</span><strong>Active App</strong></li>
+          </ol>
+          <p class="workflow-note">
+            Raw mode stops after transcription. Clean and Dev Prompt use Gemini. Dev Prompt can also
+            include selected-text and active-app context.
+          </p>
+        </div>
+      </section>
+
+      <section class="section privacy" id="privacy" aria-labelledby="privacy-title">
+        <div class="shell privacy-grid">
+          <div>
+            <p class="section-kicker">Privacy &amp; security</p>
+            <h2 id="privacy-title">Built to stay out of your way — and out of your data.</h2>
+            <p class="privacy-lede">Voca stores what it needs locally and does not build a transcript history around your work.</p>
+          </div>
+          <div>
+            <ul class="check-list">
+              <li>API keys are encrypted locally using Electron safeStorage.</li>
+              <li>Audio is processed in memory and is not saved by Voca.</li>
+              <li>Transcript content is not persisted.</li>
+              <li>Only aggregate usage and latency metrics are stored locally.</li>
+              <li>Voca has no accounts, analytics backend, or transcript database.</li>
+            </ul>
+            <p class="provider-note">
+              Audio, text, and relevant context are sent to the configured Groq and Gemini APIs when
+              required and are subject to those providers' policies.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section final-cta" id="download" aria-labelledby="download-title">
+        <div class="shell final-cta-card">
+          <img src="assets/voca-icon.png" width="74" height="74" alt="">
+          <p class="section-kicker">Voca for macOS</p>
+          <h2 id="download-title">Stop typing every thought.</h2>
+          <p>Hold a shortcut. Say what you mean. Keep building.</p>
+          <div class="hero-actions centered-actions">
+            <a class="button button-primary" href="https://github.com/krishadya/Voca/releases/latest">Download Voca v0.1.1</a>
+            <a class="button button-secondary" href="https://github.com/krishadya/Voca">View source</a>
+          </div>
+          <p class="requirements">Requires macOS on Apple Silicon. Groq and Gemini API keys required.</p>
+          <details class="install-note">
+            <summary>First-launch note</summary>
+            <p>
+              Voca is currently unsigned and not notarized. On first launch, macOS may require you to
+              Control-click Voca → Open, or allow it from System Settings → Privacy &amp; Security.
+            </p>
+          </details>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="shell footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="#top"><img src="assets/voca-icon.png" width="34" height="34" alt=""><span>Voca</span></a>
+          <p>Voice to intent, instantly.</p>
+        </div>
+        <nav class="footer-links" aria-label="Footer navigation">
+          <a href="https://github.com/krishadya/Voca">GitHub</a>
+          <a href="https://github.com/krishadya/Voca/releases/latest">Releases</a>
+          <a href="https://www.linkedin.com/in/krish-adya-91a4822b3/">LinkedIn</a>
+          <a href="https://krish.copasite.in">Krish Adya</a>
+        </nav>
+        <p class="footer-credit">Built by Krish Adya.</p>
+      </div>
+    </footer>
+    <script src="script.js"></script>
+  </body>
+</html>

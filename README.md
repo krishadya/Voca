@@ -15,12 +15,23 @@
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-19191C?style=flat-square&logo=typescript&logoColor=E8BC68">
   <img alt="Groq Whisper" src="https://img.shields.io/badge/Groq-Whisper-19191C?style=flat-square">
   <img alt="Gemini" src="https://img.shields.io/badge/Gemini-AI-19191C?style=flat-square&logo=googlegemini&logoColor=E8BC68">
+  <a href="https://github.com/krishadya/Voca/releases/latest">
+    <img alt="Latest Release" src="https://img.shields.io/github/v/release/krishadya/Voca?style=flat-square&color=E8BC68&labelColor=19191C">
+  </a>
 </p>
 
 <p align="center">
   Voca is a macOS menu-bar utility that turns natural speech into raw transcripts,
   polished text, or structured developer prompts and inserts the result directly
   into the app you're already using.
+</p>
+
+<p align="center">
+  <a href="LANDING_PAGE_URL"><strong>Website</strong></a>
+  ·
+  <a href="https://github.com/krishadya/Voca/releases/latest"><strong>Download</strong></a>
+  ·
+  <a href="https://github.com/krishadya/Voca"><strong>GitHub</strong></a>
 </p>
 
 <p align="center">
@@ -140,13 +151,13 @@ Relevant audio, text, and context are still sent to the configured provider APIs
 
 ## Installation
 
-Voca V0.1 is currently packaged for Apple Silicon Macs as:
+The latest release, **Voca v0.1.1**, is currently packaged for Apple Silicon Macs as:
 
 ```text
-Voca-0.1.0-arm64.dmg
+Voca-0.1.1-arm64.dmg
 ```
 
-1. Download the DMG from [GitHub Releases](https://github.com/krishadya/Voca/releases).
+1. Download the latest DMG from [GitHub Releases](https://github.com/krishadya/Voca/releases/latest).
 2. Open it and drag **Voca** into **Applications**.
 3. Launch Voca and complete onboarding with your own Groq and Gemini API keys.
 4. Grant **Microphone** and **Accessibility** permission. Some Macs may also require **Input Monitoring**.
@@ -183,7 +194,7 @@ npm run build
 ## Known limitations
 
 - macOS only
-- V0.1 is currently packaged for Apple Silicon / ARM64
+- The current release is packaged for Apple Silicon / ARM64
 - The app and DMG are unsigned and not notarized
 - Groq and Gemini require internet access and user-provided API keys
 - Fn/Globe and arbitrary multi-key chords such as `Space + P` are not supported as shortcuts
