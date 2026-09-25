@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type {
   AppState,
+  OverlaySnapshot,
   ProcessingMode,
   ProviderConnectionState,
   ProviderId
@@ -82,6 +83,64 @@ function useVocaState(): AppState {
     void window.voca.getAppState().then(setState)
     return unsubscribe
   }, [])
+  return state
+}
+
+function useOverlayState(): AppState | null {
+  const [state, setState] = useState<AppState | null>(null)
+  const [snapshot, setSnapshot] = useState<OverlaySnapshot | null>(null)
+  const presented = useRef(false)
+
+  useEffect(() => {
+    let active = true
+    const unsubscribe = window.voca.onListeningChanged((nextState) => {
+      if (active) setState(nextState)
+    })
+
+    void window.voca.overlayReady().then((latestSnapshot) => {
+      if (active && latestSnapshot) {
+        setState(latestSnapshot.state)
+        setSnapshot(latestSnapshot)
+      }
+    }).catch(() => {
+      // The panel may be destroyed before its renderer finishes loading.
+    })
+
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!snapshot || presented.current) return
+
+    let active = true
+    const frame = requestAnimationFrame(() => {
+      void window.voca.overlayPresented(
+        snapshot.generation,
+        snapshot.revision,
+        snapshot.state.recordingSessionId
+      ).then((latestSnapshot) => {
+        if (!active) return
+        if (latestSnapshot) {
+          setState(latestSnapshot.state)
+          setSnapshot(latestSnapshot)
+        } else {
+          presented.current = true
+        }
+      })
+        .catch(() => {
+          // The panel may be destroyed before the rendered-state acknowledgment.
+        })
+    })
+
+    return () => {
+      active = false
+      cancelAnimationFrame(frame)
+    }
+  }, [snapshot])
+
   return state
 }
 
@@ -487,7 +546,8 @@ function SettingsRoute(): React.JSX.Element {
 }
 
 function OverlayRoute(): React.JSX.Element {
-  return <Overlay state={useVocaState()} />
+  const state = useOverlayState()
+  return state ? <Overlay state={state} /> : <></>
 }
 
 export function App(): React.JSX.Element {

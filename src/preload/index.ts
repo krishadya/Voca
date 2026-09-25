@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '../shared/ipc'
 import type {
   AppState,
+  OverlaySnapshot,
   OverlayStyle,
   PermissionSettingsTarget,
   ProcessingMode,
@@ -14,6 +15,13 @@ import type { HotkeyActionResult, HotkeyConfig } from '../shared/hotkey'
 
 const api = {
   getAppState: (): Promise<AppState> => ipcRenderer.invoke(IPC.getAppState),
+  overlayReady: (): Promise<OverlaySnapshot | null> => ipcRenderer.invoke(IPC.overlayReady),
+  overlayPresented: (
+    generation: number,
+    revision: number,
+    sessionId: number
+  ): Promise<OverlaySnapshot | null> =>
+    ipcRenderer.invoke(IPC.overlayPresented, generation, revision, sessionId),
   toggleListening: (): Promise<void> => ipcRenderer.invoke(IPC.toggleListening),
   setProcessingMode: (mode: ProcessingMode): Promise<void> =>
     ipcRenderer.invoke(IPC.setProcessingMode, mode),

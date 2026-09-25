@@ -3,6 +3,8 @@ import type { HotkeyConfig } from './hotkey'
 export const IPC = {
   getAppState: 'voca:get-app-state',
   listeningChanged: 'voca:listening-changed',
+  overlayReady: 'voca:overlay-ready',
+  overlayPresented: 'voca:overlay-presented',
   toggleListening: 'voca:toggle-listening',
   setProcessingMode: 'voca:set-processing-mode',
   setAutoPaste: 'voca:set-auto-paste',
@@ -92,6 +94,12 @@ export interface AppState {
   recordingSessionId: number
   overlayPhase: OverlayPhase
   overlayText: string
+}
+
+export interface OverlaySnapshot {
+  generation: number
+  revision: number
+  state: AppState
 }
 
 export interface RecordingPayload {

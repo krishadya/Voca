@@ -52,6 +52,7 @@ import type {
   HotkeyMode,
   OverlayStyle,
   OverlayPhase,
+  OverlaySnapshot,
   ProcessingMode,
   RecordingErrorPayload,
   RecordingPayload,
@@ -117,16 +118,26 @@ let overlayPhase: OverlayPhase = 'hidden'
 let overlayText = ''
 let recordingDeliveryTimer: ReturnType<typeof setTimeout> | null = null
 let overlayHideTimer: ReturnType<typeof setTimeout> | null = null
+let overlayGeneration = 0
+let overlayStateRevision = 0
+let overlaySessionId: number | null = null
+let overlayRendererSubscribed = false
+let overlayRendererReady = false
+let overlayFirstShowLogged = false
+const overlayWindowMetadata = new WeakMap<
+  BrowserWindow,
+  { generation: number; sessionId: number; startedAtMs: number; destructionLogged: boolean }
+>()
 let quitting = false
 
-function loadRenderer(window: BrowserWindow, route: 'settings' | 'overlay'): void {
+function loadRenderer(window: BrowserWindow, route: 'settings' | 'overlay'): Promise<void> {
   const developmentUrl = process.env.ELECTRON_RENDERER_URL
 
   if (developmentUrl) {
-    void window.loadURL(`${developmentUrl}#/${route}`)
-  } else {
-    void window.loadFile(join(__dirname, '../renderer/index.html'), { hash: `/${route}` })
+    return window.loadURL(`${developmentUrl}#/${route}`)
   }
+
+  return window.loadFile(join(__dirname, '../renderer/index.html'), { hash: `/${route}` })
 }
 
 function createSettingsWindow(): BrowserWindow {
@@ -160,12 +171,13 @@ function createSettingsWindow(): BrowserWindow {
     if (hotkeyCaptureActive) cancelHotkeyCapture()
   })
 
-  loadRenderer(window, 'settings')
+  void loadRenderer(window, 'settings')
   return window
 }
 
 function createOverlayWindow(): BrowserWindow {
   const window = new BrowserWindow({
+    type: 'panel',
     width: COMPACT_OVERLAY_WIDTH,
     height: COMPACT_OVERLAY_HEIGHT,
     show: false,
@@ -188,9 +200,11 @@ function createOverlayWindow(): BrowserWindow {
   })
 
   window.setAlwaysOnTop(true, 'floating')
-  window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  window.setVisibleOnAllWorkspaces(true, {
+    visibleOnFullScreen: true,
+    skipTransformProcessType: true
+  })
   window.setIgnoreMouseEvents(true)
-  loadRenderer(window, 'overlay')
   return window
 }
 
@@ -291,7 +305,14 @@ function updateTrayMenu(): void {
 function broadcastState(): void {
   const state = currentState()
   settingsWindow?.webContents.send(IPC.listeningChanged, state)
-  overlayWindow?.webContents.send(IPC.listeningChanged, state)
+  if (
+    overlayRendererReady &&
+    overlayWindow &&
+    !overlayWindow.isDestroyed() &&
+    !overlayWindow.webContents.isDestroyed()
+  ) {
+    overlayWindow.webContents.send(IPC.listeningChanged, state)
+  }
   updateTrayMenu()
 }
 
@@ -464,31 +485,207 @@ function clearOverlayHideTimer(): void {
   }
 }
 
+function logOverlayTiming(
+  generation: number,
+  sessionId: number,
+  event: string,
+  startedAtMs: number
+): void {
+  if (app.isPackaged) return
+  console.info(
+    `[overlay:lifecycle] generation ${generation}, session ${sessionId}: ${event} ` +
+      `(+${Math.round(performance.now() - startedAtMs)}ms)`
+  )
+}
+
+function currentOverlaySnapshot(): OverlaySnapshot {
+  return {
+    generation: overlayGeneration,
+    revision: overlayStateRevision,
+    state: currentState()
+  }
+}
+
+function destroyOverlayPanel(reason: string): void {
+  const window = overlayWindow
+
+  overlayGeneration += 1
+  overlayWindow = null
+  overlaySessionId = null
+  overlayRendererSubscribed = false
+  overlayRendererReady = false
+  overlayFirstShowLogged = false
+
+  if (!window || window.isDestroyed()) return
+
+  const metadata = overlayWindowMetadata.get(window)
+  if (metadata && !metadata.destructionLogged) {
+    metadata.destructionLogged = true
+    logOverlayTiming(
+      metadata.generation,
+      metadata.sessionId,
+      `destruction (${reason})`,
+      metadata.startedAtMs
+    )
+  }
+
+  window.hide()
+  window.destroy()
+}
+
+function createOverlayForSession(sessionId: number): void {
+  const generation = ++overlayGeneration
+  overlaySessionId = sessionId
+  overlayRendererSubscribed = false
+  overlayRendererReady = false
+  overlayFirstShowLogged = false
+
+  setImmediate(() => {
+    if (
+      generation !== overlayGeneration ||
+      overlaySessionId !== sessionId ||
+      recordingSessionId !== sessionId ||
+      overlayPhase === 'hidden'
+    ) {
+      return
+    }
+
+    const startedAtMs = performance.now()
+    logOverlayTiming(generation, sessionId, 'creation started', startedAtMs)
+
+    let window: BrowserWindow
+    try {
+      window = createOverlayWindow()
+    } catch (error) {
+      console.error('[overlay] Could not create overlay window:', readableError(error))
+      if (generation === overlayGeneration && overlaySessionId === sessionId) {
+        destroyOverlayPanel('creation failed')
+      }
+      return
+    }
+
+    overlayWindow = window
+    overlayWindowMetadata.set(window, {
+      generation,
+      sessionId,
+      startedAtMs,
+      destructionLogged: false
+    })
+
+    window.once('closed', () => {
+      const metadata = overlayWindowMetadata.get(window)
+      if (metadata && !metadata.destructionLogged) {
+        metadata.destructionLogged = true
+        logOverlayTiming(
+          metadata.generation,
+          metadata.sessionId,
+          'destruction (window closed)',
+          metadata.startedAtMs
+        )
+      }
+
+      if (overlayWindow === window && overlayGeneration === generation) {
+        overlayWindow = null
+        overlaySessionId = null
+        overlayRendererSubscribed = false
+        overlayRendererReady = false
+        overlayFirstShowLogged = false
+      }
+    })
+
+    void loadRenderer(window, 'overlay')
+      .then(() => {
+        if (
+          overlayWindow === window &&
+          overlayGeneration === generation &&
+          overlaySessionId === sessionId
+        ) {
+          logOverlayTiming(generation, sessionId, 'navigation complete', startedAtMs)
+        }
+      })
+      .catch((error) => {
+        if (
+          overlayWindow === window &&
+          overlayGeneration === generation &&
+          overlaySessionId === sessionId
+        ) {
+          console.error('[overlay] Renderer failed to load:', readableError(error))
+          destroyOverlayPanel('navigation failed')
+        }
+      })
+  })
+}
+
+/**
+ * Reasserts native window properties that macOS can silently reset on panel
+ * windows after hide/show cycles, Space transitions, or fullscreen changes.
+ * Called immediately before every showInactive() so the overlay reliably
+ * appears on the currently active Space and over fullscreen applications.
+ */
+function reassertOverlayNativeState(): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return
+  overlayWindow.setAlwaysOnTop(true, 'floating')
+  overlayWindow.setVisibleOnAllWorkspaces(true, {
+    visibleOnFullScreen: true,
+    skipTransformProcessType: true
+  })
+}
+
+function showCurrentOverlayWindow(): void {
+  const window = overlayWindow
+  if (
+    !overlayRendererReady ||
+    !window ||
+    window.isDestroyed() ||
+    overlayPhase === 'hidden'
+  ) {
+    return
+  }
+
+  const minimalIndicator =
+    overlayStyle === 'minimal' &&
+    overlayPhase !== 'copied' &&
+    overlayPhase !== 'error'
+  const isDetailedResult = overlayPhase === 'transcript' || overlayPhase === 'copied'
+  const width = minimalIndicator
+    ? MINIMAL_OVERLAY_WIDTH
+    : isDetailedResult
+      ? RESULT_OVERLAY_WIDTH
+      : COMPACT_OVERLAY_WIDTH
+  const height = minimalIndicator
+    ? MINIMAL_OVERLAY_HEIGHT
+    : isDetailedResult
+      ? RESULT_OVERLAY_HEIGHT
+      : COMPACT_OVERLAY_HEIGHT
+
+  window.setSize(width, height, false)
+  positionOverlay()
+  reassertOverlayNativeState()
+  window.showInactive()
+
+  if (!overlayFirstShowLogged) {
+    overlayFirstShowLogged = true
+    const metadata = overlayWindowMetadata.get(window)
+    if (metadata) {
+      logOverlayTiming(
+        metadata.generation,
+        metadata.sessionId,
+        'first showInactive',
+        metadata.startedAtMs
+      )
+    }
+  }
+}
+
 function setOverlay(phase: OverlayPhase, text = ''): void {
   overlayPhase = phase
   overlayText = text
+  overlayStateRevision += 1
 
   if (phase === 'hidden') {
-    overlayWindow?.hide()
+    destroyOverlayPanel('hidden')
   } else {
-    const minimalIndicator =
-      overlayStyle === 'minimal' &&
-      phase !== 'copied' &&
-      phase !== 'error'
-    const isDetailedResult = phase === 'transcript' || phase === 'copied'
-    const width = minimalIndicator
-      ? MINIMAL_OVERLAY_WIDTH
-      : isDetailedResult
-        ? RESULT_OVERLAY_WIDTH
-        : COMPACT_OVERLAY_WIDTH
-    const height = minimalIndicator
-      ? MINIMAL_OVERLAY_HEIGHT
-      : isDetailedResult
-        ? RESULT_OVERLAY_HEIGHT
-        : COMPACT_OVERLAY_HEIGHT
-    overlayWindow?.setSize(width, height, false)
-    positionOverlay()
-    overlayWindow?.showInactive()
+    showCurrentOverlayWindow()
   }
 
   broadcastState()
@@ -566,7 +763,9 @@ function setListening(next: boolean, source: string): void {
     recordingHasExternalTarget = BrowserWindow.getFocusedWindow() === null
     recordingReleasedAtMs = 0
     recordingContextPromise = captureRecordingContext()
+    destroyOverlayPanel('superseded by new recording')
     setOverlay('listening')
+    createOverlayForSession(recordingSessionId)
   } else {
     const stoppedSessionId = recordingSessionId
     recordingReleasedAtMs = performance.now()
@@ -792,8 +991,69 @@ function isSettingsSender(webContentsId: number): boolean {
   return webContentsId === settingsWindow?.webContents.id
 }
 
+function isCurrentOverlaySender(webContentsId: number): boolean {
+  return (
+    overlayWindow !== null &&
+    !overlayWindow.isDestroyed() &&
+    !overlayWindow.webContents.isDestroyed() &&
+    webContentsId === overlayWindow.webContents.id
+  )
+}
+
 function installIpcHandlers(): void {
   ipcMain.handle(IPC.getAppState, () => currentState())
+  ipcMain.handle(IPC.overlayReady, (event) => {
+    if (
+      !isCurrentOverlaySender(event.sender.id) ||
+      overlaySessionId !== recordingSessionId ||
+      overlayPhase === 'hidden'
+    ) {
+      return null
+    }
+
+    if (!overlayRendererSubscribed) {
+      overlayRendererSubscribed = true
+      const metadata = overlayWindow ? overlayWindowMetadata.get(overlayWindow) : undefined
+      if (metadata) {
+        logOverlayTiming(
+          metadata.generation,
+          metadata.sessionId,
+          'renderer ready',
+          metadata.startedAtMs
+        )
+      }
+    }
+
+    return currentOverlaySnapshot()
+  })
+  ipcMain.handle(
+    IPC.overlayPresented,
+    (event, generation: unknown, revision: unknown, sessionId: unknown) => {
+      if (
+        !isCurrentOverlaySender(event.sender.id) ||
+        !overlayRendererSubscribed ||
+        !Number.isInteger(generation) ||
+        !Number.isInteger(revision) ||
+        !Number.isInteger(sessionId) ||
+        overlayPhase === 'hidden'
+      ) {
+        return null
+      }
+
+      if (
+        generation !== overlayGeneration ||
+        revision !== overlayStateRevision ||
+        sessionId !== overlaySessionId ||
+        sessionId !== recordingSessionId
+      ) {
+        return currentOverlaySnapshot()
+      }
+
+      overlayRendererReady = true
+      showCurrentOverlayWindow()
+      return null
+    }
+  )
   ipcMain.handle(IPC.toggleListening, () => toggleListening('settings'))
   ipcMain.handle(IPC.setProcessingMode, (event, mode: unknown) => {
     if (!isSettingsSender(event.sender.id)) return
@@ -979,7 +1239,6 @@ void app.whenReady().then(async () => {
   settingsWindow.once('ready-to-show', () => {
     if (!onboardingComplete) showSettings()
   })
-  overlayWindow = createOverlayWindow()
   tray = createTray()
   installIpcHandlers()
   configureMediaPermissions()
@@ -1006,6 +1265,7 @@ app.on('before-quit', () => {
   quitting = true
   clearRecordingDeliveryTimer()
   clearOverlayHideTimer()
+  destroyOverlayPanel('app quit')
   hotkeyService?.stop()
 })
 
