@@ -42,7 +42,7 @@
 
 See Voca go from **speech → transcription → developer intent → automatic insertion**.
 
-[Watch the Voca demo](DEMO_VIDEO_URL)
+[Watch the Voca demo](https://youtu.be/BrCJY8J4uFc)
 
 ## Features
 
