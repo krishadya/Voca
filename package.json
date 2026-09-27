@@ -1,11 +1,22 @@
 {
   "name": "voca",
   "version": "0.1.1",
-  "description": "A macOS-first push-to-talk desktop voice tool.",
+  "description": "Context-aware macOS voice-to-intent utility for developers.",
   "main": "./out/main/index.js",
-  "author": "Voca",
-  "license": "UNLICENSED",
+  "author": "Krish Adya",
+  "license": "MIT",
   "private": true,
+  "homepage": "https://krishadya.github.io/Voca/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/krishadya/Voca.git"
+  },
+  "bugs": {
+    "url": "https://github.com/krishadya/Voca/issues"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",

@@ -2,6 +2,7 @@ node_modules/
 out/
 release/
 dist/
+build/voca.iconset/
 .DS_Store
 *.log
 .env
@@ -9,3 +10,4 @@ dist/
 .env.*.local
 coverage/
 *.tsbuildinfo
+Voca Demo.mp4
