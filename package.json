@@ -1,6 +1,6 @@
 {
   "name": "voca",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Context-aware macOS voice-to-intent utility for developers.",
   "main": "./out/main/index.js",
   "author": "Krish Adya",

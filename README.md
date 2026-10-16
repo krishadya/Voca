@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="macOS ARM64" src="https://img.shields.io/badge/macOS-ARM64-19191C?style=flat-square&logo=apple&logoColor=E8BC68">
+  <img alt="macOS Apple Silicon and Intel" src="https://img.shields.io/badge/macOS-Apple_Silicon_%2B_Intel-19191C?style=flat-square&logo=apple&logoColor=E8BC68">
   <img alt="Electron" src="https://img.shields.io/badge/Electron-19191C?style=flat-square&logo=electron&logoColor=E8BC68">
   <img alt="React" src="https://img.shields.io/badge/React-19191C?style=flat-square&logo=react&logoColor=E8BC68">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-19191C?style=flat-square&logo=typescript&logoColor=E8BC68">
@@ -151,11 +151,10 @@ Relevant audio, text, and context are still sent to the configured provider APIs
 
 ## Installation
 
-The latest release, **Voca v0.1.1**, is currently packaged for Apple Silicon Macs as:
+The latest release, **Voca v0.1.2**, is available for both Apple Silicon and Intel Macs:
 
-```text
-Voca-0.1.1-arm64.dmg
-```
+- Apple Silicon Macs: `Voca-0.1.2-arm64.dmg`
+- Intel Macs: `Voca-0.1.2-x64.dmg`
 
 1. Download the latest DMG from [GitHub Releases](https://github.com/krishadya/Voca/releases/latest).
 2. Open it and drag **Voca** into **Applications**.
@@ -194,7 +193,6 @@ npm run build
 ## Known limitations
 
 - macOS only
-- The current release is packaged for Apple Silicon / ARM64
 - The app and DMG are unsigned and not notarized
 - Groq and Gemini require internet access and user-provided API keys
 - Fn/Globe and arbitrary multi-key chords such as `Space + P` are not supported as shortcuts
