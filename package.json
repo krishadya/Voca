@@ -18,8 +18,11 @@
     "node": ">=22.12.0"
   },
   "scripts": {
+    "predev": "node scripts/build-native.mjs",
     "dev": "electron-vite dev",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test:hotkeys": "node scripts/test-hotkeys.mjs",
+    "prebuild": "node scripts/build-native.mjs",
     "build": "npm run typecheck && electron-vite build",
     "preview": "electron-vite preview",
     "package:mac": "npm run build && electron-builder --mac"
@@ -36,6 +39,12 @@
     ],
     "asarUnpack": [
       "node_modules/uiohook-napi/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "build/native/voca-fn-control",
+        "to": "voca-fn-control"
+      }
     ],
     "mac": {
       "icon": "build/voca.icns",

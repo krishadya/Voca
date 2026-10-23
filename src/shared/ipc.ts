@@ -24,10 +24,12 @@ export const IPC = {
   openPermissionSettings: 'voca:open-permission-settings',
   completeOnboarding: 'voca:complete-onboarding',
   transcribeRecording: 'voca:transcribe-recording',
+  discardRecording: 'voca:discard-recording',
+  recordingDiagnostic: 'voca:recording-diagnostic',
   recordingError: 'voca:recording-error'
 } as const
 
-export type HotkeyMode = 'hold' | 'toggle'
+export type HotkeyMode = 'hold' | 'toggle' | 'unavailable'
 export type ProcessingMode = 'raw' | 'clean' | 'dev-prompt'
 export type OverlayStyle = 'detailed' | 'minimal'
 export type ProviderId = 'groq' | 'gemini'

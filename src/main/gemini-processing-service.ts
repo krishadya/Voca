@@ -1,6 +1,9 @@
 import type { ProcessingMode } from '../shared/ipc'
 import type { ActiveAppInfo } from './active-app-service'
 import { MissingProviderKeyError } from './provider-errors'
+import { performance } from 'node:perf_hooks'
+import { timeRequest } from './request-timing'
+import type { RequestTiming } from './request-timing'
 
 export const GEMINI_MODEL = 'gemini-3.5-flash-lite'
 
@@ -115,35 +118,39 @@ export class GeminiProcessingService {
   async process(
     text: string,
     mode: Exclude<ProcessingMode, 'raw'>,
-    context?: GeminiProcessingContext
+    context?: GeminiProcessingContext,
+    onTiming?: RequestTiming
   ): Promise<string> {
+    const preparedAt = performance.now()
     const apiKey = this.getApiKey()
     if (!apiKey) throw new MissingProviderKeyError('gemini')
 
-    const response = await fetch(GENERATE_CONTENT_ENDPOINT, {
+    const body = JSON.stringify({
+      systemInstruction: {
+        parts: [{ text: instructionFor(mode) }]
+      },
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: inputFor(text, mode, context) }]
+        }
+      ],
+      generationConfig: {
+        maxOutputTokens: 2048
+      }
+    })
+    onTiming?.('prepare', performance.now() - preparedAt)
+    const response = await timeRequest('request', () => fetch(GENERATE_CONTENT_ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-goog-api-key': apiKey
       },
-      body: JSON.stringify({
-        systemInstruction: {
-          parts: [{ text: instructionFor(mode) }]
-        },
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: inputFor(text, mode, context) }]
-          }
-        ],
-        generationConfig: {
-          maxOutputTokens: 2048
-        }
-      }),
+      body,
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
-    })
+    }), onTiming)
 
-    const result = (await response.json().catch(() => ({}))) as GeminiResponse
+    const result = (await timeRequest('decode', () => response.json().catch(() => ({})), onTiming)) as GeminiResponse
 
     if (!response.ok) {
       throw new Error(apiErrorMessage(result, response.status))

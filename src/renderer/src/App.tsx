@@ -8,6 +8,7 @@ import type {
 } from '../../shared/ipc'
 import {
   DEFAULT_HOTKEY,
+  F8_HOTKEY,
   formatHotkey,
   HOTKEY_LIMITATION_NOTE,
   HOTKEY_USAGE_GUIDANCE,
@@ -29,7 +30,7 @@ const missingProvider = (id: ProviderId): ProviderConnectionState => ({
 const initialState: AppState = {
   appVersion: '0.1.0',
   listening: false,
-  hotkeyMode: 'toggle',
+  hotkeyMode: 'unavailable',
   hotkeyMessage: 'Starting keyboard shortcut…',
   hotkey: DEFAULT_HOTKEY,
   microphoneStatus: 'unknown',
@@ -252,6 +253,14 @@ function ShortcutEditor({ state }: { state: AppState }): React.JSX.Element {
   const [captureActive, setCaptureActive] = useState(false)
   const [feedback, setFeedback] = useState('')
 
+  const applyPreset = async (shortcut: HotkeyConfig): Promise<void> => {
+    setCaptureActive(false)
+    const result = shortcut.key === 'FnControl'
+      ? await window.voca.resetHotkey()
+      : await window.voca.setHotkey(shortcut)
+    setFeedback(result.success ? `Shortcut changed to ${formatHotkey(shortcut)}.` : result.message)
+  }
+
   const cancelCapture = async (): Promise<void> => {
     setCaptureActive(false)
     const result = await window.voca.cancelHotkeyCapture()
@@ -267,12 +276,6 @@ function ShortcutEditor({ state }: { state: AppState }): React.JSX.Element {
     } else setFeedback(result.message)
   }
 
-  const resetShortcut = async (): Promise<void> => {
-    setCaptureActive(false)
-    const result = await window.voca.resetHotkey()
-    setFeedback(result.success ? 'Shortcut reset to F8.' : result.message)
-  }
-
   useEffect(() => {
     if (!captureActive) return
     const handleKeyDown = (event: KeyboardEvent): void => {
@@ -280,6 +283,10 @@ function ShortcutEditor({ state }: { state: AppState }): React.JSX.Element {
       event.stopPropagation()
       if (event.repeat) return
       if (event.code === 'Escape') return void cancelCapture()
+      if (event.code === 'Fn' || event.key === 'Fn' || event.getModifierState('Fn')) {
+        setFeedback('Select “Fn + Control (default)” below; macOS does not reliably expose Fn to shortcut recording.')
+        return
+      }
       if (isModifierCode(event.code)) {
         setFeedback('Add a non-modifier key to complete the shortcut.')
         return
@@ -324,7 +331,8 @@ function ShortcutEditor({ state }: { state: AppState }): React.JSX.Element {
       <div className="shortcut-control">
         <kbd>{captureActive ? 'Press your new shortcut…' : formatHotkey(state.hotkey)}</kbd>
         <button type="button" className="button-secondary" onClick={() => void toggleCapture()} disabled={state.listening}>{captureActive ? 'Cancel' : 'Change'}</button>
-        {formatHotkey(state.hotkey) !== 'F8' && <button type="button" className="button-quiet" onClick={() => void resetShortcut()} disabled={state.listening}>Reset to F8</button>}
+        <button type="button" className="button-quiet" onClick={() => void applyPreset(DEFAULT_HOTKEY)} disabled={state.listening}>Fn + Control (default)</button>
+        {formatHotkey(state.hotkey) !== 'F8' && <button type="button" className="button-quiet" onClick={() => void applyPreset(F8_HOTKEY)} disabled={state.listening}>Use F8</button>}
       </div>
     </div>
   )
@@ -531,7 +539,7 @@ function Onboarding({ state }: { state: AppState }): React.JSX.Element {
         {step === 0 && <div className="welcome-step"><BrandMark size="large" /><h1>Welcome to Voca</h1><p>Turn your voice into clean text and developer prompts.</p><div className="value-grid"><article><span><Icon name="spark" /></span><strong>Speak anywhere</strong><p>Hold a shortcut and start talking.</p></article><article><span><Icon name="document" /></span><strong>Clean text or structured prompts</strong><p>Turn natural speech into useful output.</p></article><article><span><Icon name="command" /></span><strong>Built for developers</strong><p>Works in any app on your Mac.</p></article></div></div>}
         {step === 1 && <div className="onboarding-section"><PageHeader title="Connect your providers" description="Groq transcribes audio. Gemini powers Clean and Dev Prompt modes." /><div className="provider-grid"><ProviderCard provider="groq" state={state.providers.groq} onboarding /><ProviderCard provider="gemini" state={state.providers.gemini} onboarding /></div></div>}
         {step === 2 && <div className="onboarding-section"><PageHeader title="Grant permissions" description="Voca only asks for the macOS access required by its voice workflow." /><div className="permissions-list"><article><div className="permission-icon">●</div><div><strong>Microphone</strong><span>Record your voice while the shortcut is held.</span></div><span className={`status-badge ${state.microphoneStatus === 'granted' ? 'status-connected' : 'status-missing'}`}>{state.microphoneStatus === 'granted' ? 'Ready' : state.microphoneStatus}</span><button type="button" className="button-secondary" onClick={() => void window.voca.requestMicrophonePermission()}>Request</button><button type="button" className="button-quiet" onClick={() => void window.voca.openPermissionSettings('microphone')}>Settings</button></article><article><div className="permission-icon">⌘</div><div><strong>Accessibility</strong><span>Hold-to-talk, selection capture, and auto-paste.</span></div><span className={`status-badge ${state.accessibilityGranted ? 'status-connected' : 'status-missing'}`}>{state.accessibilityGranted ? 'Ready' : 'Not enabled'}</span><button type="button" className="button-secondary" onClick={() => void window.voca.requestAccessibilityPermission()}>Request</button><button type="button" className="button-quiet" onClick={() => void window.voca.openPermissionSettings('accessibility')}>Settings</button></article><article><div className="permission-icon">⌨</div><div><strong>Input Monitoring</strong><span>May be required for the global keyboard hook.</span></div><button type="button" className="button-secondary" onClick={() => void window.voca.openPermissionSettings('input-monitoring')}>Open Settings</button></article></div><p className="permission-note">Restart Voca after changing Accessibility or Input Monitoring permissions.</p></div>}
-        {step === 3 && <div className="onboarding-section shortcut-onboarding"><PageHeader title="Choose your shortcut" description="Use the current shortcut or record a new push-to-talk combination." /><div className="shortcut-hero"><span>Current shortcut</span><kbd>{formatHotkey(state.hotkey)}</kbd><small>{state.hotkeyMode === 'hold' ? 'Hold to talk' : 'Toggle fallback mode'}</small></div><ShortcutEditor state={state} /></div>}
+        {step === 3 && <div className="onboarding-section shortcut-onboarding"><PageHeader title="Choose your shortcut" description="Fn + Control is the default. Hold both keys to talk and release either to stop, or choose F8 or a custom shortcut." /><div className="shortcut-hero"><span>Current shortcut</span><kbd>{formatHotkey(state.hotkey)}</kbd><small>{state.hotkeyMode === 'hold' ? 'Hold to talk' : state.hotkeyMode === 'toggle' ? 'Toggle fallback mode' : 'Native keyboard access required'}</small></div><ShortcutEditor state={state} /></div>}
         {step === 4 && <div className="test-step"><BrandMark size="medium" /><h1>Test Voca</h1><p>Hold <kbd>{formatHotkey(state.hotkey)}</kbd> and say:</p><blockquote>“Voca is working.”</blockquote><ListeningBars muted={!state.listening} /><span>{state.listening ? 'Listening now… release when finished.' : state.hotkeyMessage}</span></div>}
         {step === 5 && <div className="finish-step"><div className="finish-check">✓</div><BrandMark size="medium" /><h1>You’re all set.</h1><p>Voca is ready in your menu bar. Hold <kbd>{formatHotkey(state.hotkey)}</kbd> whenever you want to speak.</p>{finishFeedback && <p className="provider-feedback">{finishFeedback}</p>}</div>}
       </section>

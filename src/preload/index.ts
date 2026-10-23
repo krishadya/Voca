@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '../shared/ipc'
+import type { RecordingDiagnostic } from '../shared/recording-diagnostics'
 import type {
   AppState,
   OverlaySnapshot,
@@ -65,6 +66,12 @@ const api = {
   },
   reportRecordingError: (error: RecordingErrorPayload): void => {
     ipcRenderer.send(IPC.recordingError, error)
+  },
+  discardRecording: (sessionId: number): void => {
+    ipcRenderer.send(IPC.discardRecording, sessionId)
+  },
+  reportRecordingDiagnostic: (diagnostic: RecordingDiagnostic): void => {
+    ipcRenderer.send(IPC.recordingDiagnostic, diagnostic)
   }
 }
 

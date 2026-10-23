@@ -13,6 +13,7 @@ export interface AppSettings {
   developerVocabulary: string[]
   aggregateMetrics: AggregateMetrics
   hotkey: HotkeyConfig
+  hotkeyPreference: 'default' | 'custom'
   onboardingComplete: boolean
 }
 
@@ -27,6 +28,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   developerVocabulary: [],
   aggregateMetrics: EMPTY_AGGREGATE_METRICS,
   hotkey: DEFAULT_HOTKEY,
+  hotkeyPreference: 'default',
   onboardingComplete: false
 }
 
@@ -55,8 +57,14 @@ export class SettingsStore {
         developerVocabulary?: unknown
         aggregateMetrics?: unknown
         hotkey?: unknown
+        hotkeyPreference?: unknown
         onboardingComplete?: unknown
       }
+      const savedHotkey = normalizeHotkey(settings.hotkey)
+      const followsDefault = settings.hotkey === undefined || (
+        settings.hotkeyPreference === 'default' && savedHotkey?.modifiers.length === 0 &&
+        (savedHotkey.key === 'F8' || savedHotkey.key === DEFAULT_HOTKEY.key)
+      )
       return {
         processingMode: isProcessingMode(settings.processingMode)
           ? settings.processingMode
@@ -68,7 +76,12 @@ export class SettingsStore {
           : DEFAULT_SETTINGS.overlayStyle,
         developerVocabulary: normalizeVocabulary(settings.developerVocabulary),
         aggregateMetrics: sanitizeAggregateMetrics(settings.aggregateMetrics),
-        hotkey: loadHotkey(settings.hotkey),
+        // Old versions saved F8 without recording whether it was a deliberate
+        // choice. Preserve that ambiguous value; migrate only identifiable defaults.
+        hotkey: followsDefault
+          ? copyHotkey(DEFAULT_HOTKEY)
+          : loadHotkey(settings.hotkey),
+        hotkeyPreference: followsDefault ? 'default' : 'custom',
         onboardingComplete:
           typeof settings.onboardingComplete === 'boolean'
             ? settings.onboardingComplete

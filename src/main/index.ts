@@ -14,7 +14,11 @@ import {
   Tray
 } from 'electron'
 import { HotkeyService } from './hotkey-service'
-import { GroqTranscriptionService } from './groq-transcription-service'
+import { GroqTranscriptionService, TranscriptionError } from './groq-transcription-service'
+import { logPtt } from './ptt-diagnostics'
+import { PipelineTiming } from './pipeline-timing'
+import { captureContextForMode } from './recording-context'
+import { sanitizeRecordingDiagnostic } from '../shared/recording-diagnostics'
 import { GeminiProcessingService } from './gemini-processing-service'
 import type { GeminiProcessingContext } from './gemini-processing-service'
 import { ActiveAppService } from './active-app-service'
@@ -94,9 +98,11 @@ let providerCredentialsService: ProviderCredentialsService | null = null
 let listening = false
 let pendingStartToken: number | null = null
 let transitionToken = 0
-let hotkeyMode: HotkeyMode = 'toggle'
+let hotkeyMode: HotkeyMode = 'unavailable'
 let hotkeyMessage = 'Starting keyboard shortcut…'
 let hotkey: HotkeyConfig = copyHotkey(DEFAULT_HOTKEY)
+let hotkeyPreference: 'default' | 'custom' = 'default'
+let hotkeyChangePending = false
 let hotkeyCaptureActive = false
 let microphoneStatus = 'unknown'
 let accessibilityGranted = false
@@ -113,6 +119,8 @@ let recordingHasExternalTarget = true
 let recordingSessionId = 0
 let recordingContextPromise: Promise<GeminiProcessingContext> = Promise.resolve({})
 let recordingReleasedAtMs = 0
+let recordingTiming: PipelineTiming | null = null
+let lastSubmittedSessionId = 0
 let lastMetricsSessionId = 0
 let overlayPhase: OverlayPhase = 'hidden'
 let overlayText = ''
@@ -365,6 +373,7 @@ function setOverlayStyle(style: OverlayStyle): void {
 }
 
 function beginHotkeyCapture(): HotkeyActionResult {
+  if (hotkeyChangePending) return { success: false, message: 'A shortcut change is already in progress.' }
   if (listening || pendingStartToken !== null) {
     return { success: false, message: 'Stop listening before changing the shortcut.' }
   }
@@ -390,7 +399,8 @@ function cancelHotkeyCapture(): HotkeyActionResult {
   return result
 }
 
-function setHotkey(value: unknown): HotkeyActionResult {
+async function setHotkey(value: unknown, preference: 'default' | 'custom' = 'custom'): Promise<HotkeyActionResult> {
+  if (hotkeyChangePending) return { success: false, message: 'A shortcut change is already in progress.' }
   if (listening || pendingStartToken !== null) {
     return { success: false, message: 'Stop listening before changing the shortcut.' }
   }
@@ -411,12 +421,23 @@ function setHotkey(value: unknown): HotkeyActionResult {
     return { success: false, message: 'The shortcut service is not ready.' }
   }
 
-  const result = hotkeyService.reconfigure(nextHotkey)
+  hotkeyChangePending = true
+  let result: HotkeyActionResult
+  try {
+    result = await hotkeyService.reconfigure(nextHotkey)
+  } catch (error) {
+    console.warn('[hotkey] Could not change shortcut:', error)
+    hotkeyService.resume()
+    result = { success: false, message: 'Could not change the shortcut. Try again or select F8.' }
+  } finally {
+    hotkeyChangePending = false
+  }
   hotkeyCaptureActive = false
   hotkeyMessage = result.message
 
   if (result.success) {
     hotkey = copyHotkey(nextHotkey)
+    hotkeyPreference = preference
     saveSettings()
     console.info(`[hotkey] Changed to ${formatHotkey(hotkey)}`)
   }
@@ -425,8 +446,8 @@ function setHotkey(value: unknown): HotkeyActionResult {
   return result
 }
 
-function resetHotkey(): HotkeyActionResult {
-  return setHotkey(copyHotkey(DEFAULT_HOTKEY))
+function resetHotkey(): Promise<HotkeyActionResult> {
+  return setHotkey(copyHotkey(DEFAULT_HOTKEY), 'default')
 }
 
 function addVocabularyTerm(value: string): boolean {
@@ -467,6 +488,7 @@ function saveSettings(): void {
     developerVocabulary,
     aggregateMetrics,
     hotkey,
+    hotkeyPreference,
     onboardingComplete
   })
 }
@@ -678,6 +700,7 @@ function showCurrentOverlayWindow(): void {
 }
 
 function setOverlay(phase: OverlayPhase, text = ''): void {
+  logPtt('overlay phase', { sessionId: recordingSessionId, phase })
   overlayPhase = phase
   overlayText = text
   overlayStateRevision += 1
@@ -709,42 +732,35 @@ function showOperationFailure(
   overlayMessage = 'Transcription failed',
   operation = 'transcription'
 ): void {
+  // A late failure from an older request must not open Settings over a new target.
+  if (sessionId !== recordingSessionId) return
   if (error instanceof MissingProviderKeyError) {
     const name = error.provider === 'groq' ? 'Groq' : 'Gemini'
     overlayMessage = `${name} API key required — open Settings`
     operation = `${error.provider} credentials`
     showSettings()
   }
-  console.error(`[${operation}] Failed:`, readableError(error))
-  if (sessionId !== recordingSessionId) return
-
+  logPtt('operation-failed', {
+    sessionId, operation,
+    category: error instanceof TranscriptionError ? error.category :
+      error instanceof MissingProviderKeyError ? 'missing-key' : 'operation-error',
+    ...(error instanceof TranscriptionError && error.status !== undefined ? { status: error.status } : {})
+  })
   clearRecordingDeliveryTimer()
   listening = false
   setOverlay('error', overlayMessage)
   scheduleOverlayHide(sessionId, ERROR_DISPLAY_MS)
 }
 
-async function captureRecordingContext(): Promise<GeminiProcessingContext> {
-  const activeApplication = await activeAppService.capture()
-  console.info(
-    `[context] app: ${
-      activeApplication
-        ? `${activeApplication.name}${
-            activeApplication.bundleIdentifier
-              ? ` (${activeApplication.bundleIdentifier})`
-              : ''
-          }`
-        : 'unavailable'
-    }`
-  )
-
-  const selectedText = await selectedTextService.capture()
-  console.info(`[context] selected text: ${selectedText?.length ?? 0} chars`)
-
-  return {
-    ...(activeApplication ? { activeApplication } : {}),
-    ...(selectedText ? { selectedText } : {})
-  }
+async function captureRecordingContext(mode: ProcessingMode, timing: PipelineTiming): Promise<GeminiProcessingContext> {
+  // Both begin during recording. Clipboard capture never changes app focus;
+  // it need not wait for the two lsappinfo subprocesses to finish.
+  const context = await captureContextForMode(mode,
+    () => timing.measure('active-app-capture', () => activeAppService.capture()),
+    () => timing.measure('selected-text-capture', () =>
+      selectedTextService.capture(() => recordingSessionId === timing.sessionId)))
+  logPtt('context ready', { sessionId: timing.sessionId, selectedCharacters: context.selectedText?.length ?? 0 })
+  return context
 }
 
 function setListening(next: boolean, source: string): void {
@@ -757,18 +773,25 @@ function setListening(next: boolean, source: string): void {
     clearRecordingDeliveryTimer()
     clearOverlayHideTimer()
     recordingSessionId += 1
+    logPtt('recording session started', { sessionId: recordingSessionId })
+    const sessionId = recordingSessionId
+    const mode = processingMode
+    recordingTiming = new PipelineTiming(sessionId, (stage, durationMs) =>
+      logPtt('latency', { sessionId, mode, stage, durationMs }), undefined, !app.isPackaged)
     recordingProcessingMode = processingMode
     recordingAutoPaste = autoPaste
     recordingVocabulary = [...developerVocabulary]
     recordingHasExternalTarget = BrowserWindow.getFocusedWindow() === null
     recordingReleasedAtMs = 0
-    recordingContextPromise = captureRecordingContext()
+    recordingContextPromise = captureRecordingContext(recordingProcessingMode, recordingTiming)
     destroyOverlayPanel('superseded by new recording')
     setOverlay('listening')
     createOverlayForSession(recordingSessionId)
   } else {
     const stoppedSessionId = recordingSessionId
     recordingReleasedAtMs = performance.now()
+    recordingTiming?.mark('release')
+    recordingTiming?.span('native-observed-to-electron-release', 'native-release', 'release')
     setOverlay('transcribing')
     clearRecordingDeliveryTimer()
     recordingDeliveryTimer = setTimeout(() => {
@@ -796,7 +819,8 @@ async function ensureMicrophonePermission(): Promise<boolean> {
 }
 
 async function startListening(source: string): Promise<void> {
-  if (listening || pendingStartToken !== null || hotkeyCaptureActive) return
+  logPtt('recording start requested', { source, listening, pending: pendingStartToken !== null })
+  if (listening || pendingStartToken !== null || hotkeyCaptureActive || hotkeyChangePending) return
 
   const token = ++transitionToken
   pendingStartToken = token
@@ -821,6 +845,7 @@ async function startListening(source: string): Promise<void> {
 }
 
 function stopListening(source: string): void {
+  logPtt('recording stop requested', { source, sessionId: recordingSessionId, listening })
   if (pendingStartToken !== null) {
     ++transitionToken
     pendingStartToken = null
@@ -837,30 +862,47 @@ async function toggleListening(source: string): Promise<void> {
   }
 }
 
+function discardRecording(sessionId: number): void {
+  if (sessionId !== recordingSessionId || listening) return
+  logPtt('recording discarded before audio was captured', { sessionId })
+  clearRecordingDeliveryTimer()
+  setOverlay('hidden')
+}
+
 function isRecordingPayload(value: unknown): value is RecordingPayload {
   if (!value || typeof value !== 'object') return false
   const payload = value as Partial<RecordingPayload>
   return (
     Number.isInteger(payload.sessionId) &&
     typeof payload.durationMs === 'number' &&
+    Number.isFinite(payload.durationMs) && payload.durationMs >= 0 &&
     typeof payload.mimeType === 'string' &&
     payload.audioData instanceof ArrayBuffer
   )
 }
 
 async function transcribeRecording(payload: RecordingPayload): Promise<void> {
-  if (payload.sessionId !== recordingSessionId || listening) {
+  if (payload.sessionId !== recordingSessionId || listening || lastSubmittedSessionId === payload.sessionId) {
     console.info(`[recording] Ignored stale session ${payload.sessionId}`)
     return
   }
 
   clearRecordingDeliveryTimer()
+  lastSubmittedSessionId = payload.sessionId
+  const timing = recordingTiming!
+  const mode = recordingProcessingMode
+  const vocabulary = recordingVocabulary
+  const shouldAutoPaste = recordingAutoPaste && recordingHasExternalTarget
+  const isCurrent = (): boolean => payload.sessionId === recordingSessionId && !listening
+  timing.mark('audio-received')
+  timing.span('release-to-audio-received', 'release', 'audio-received')
+  timing.span('audio-ipc', 'buffer-ready', 'audio-received')
   const contextPromise = recordingContextPromise
   const releaseStartedAtMs = recordingReleasedAtMs || performance.now()
   const audio = Buffer.from(payload.audioData)
 
   if (audio.byteLength === 0) {
-    showOperationFailure(payload.sessionId, new Error('Recording was empty'))
+    discardRecording(payload.sessionId)
     return
   }
 
@@ -869,46 +911,48 @@ async function transcribeRecording(payload: RecordingPayload): Promise<void> {
     return
   }
 
-  if (!app.isPackaged) {
-    console.info(
-      `[recording] ${Math.round(payload.durationMs)}ms, ${audio.byteLength} bytes, ${payload.mimeType}`
-    )
-  }
+  logPtt('audio received / transcription requested', {
+    sessionId: payload.sessionId, durationMs: Math.round(payload.durationMs), bytes: audio.byteLength
+  })
 
   setOverlay('transcribing')
 
   try {
     const transcriptionStartedAtMs = performance.now()
-    const rawTranscript = await transcriptionService.transcribe({
+    const rawTranscript = await timing.measure('groq-total', () => transcriptionService.transcribe({
       audio,
       mimeType: payload.mimeType,
-      vocabulary: recordingVocabulary
-    })
+      vocabulary,
+      onTiming: app.isPackaged ? undefined : (stage, durationMs) =>
+        logPtt('latency', { sessionId: payload.sessionId, mode, stage: `groq-${stage}`, durationMs })
+    }))
     const transcriptionLatencyMs = performance.now() - transcriptionStartedAtMs
 
     if (payload.sessionId !== recordingSessionId || listening) return
 
-    if (!app.isPackaged) console.info(`[transcription:raw] ${rawTranscript}`)
+    logPtt('transcription completed', { sessionId: payload.sessionId })
 
     let finalOutput = rawTranscript
     let processingLatencyMs = 0
     let usedGemini = false
-    if (recordingProcessingMode !== 'raw') {
+    if (mode !== 'raw') {
       setOverlay('processing')
       try {
         const processingContext: GeminiProcessingContext =
-          recordingProcessingMode === 'dev-prompt'
-            ? { ...(await contextPromise), vocabulary: recordingVocabulary }
-            : { vocabulary: recordingVocabulary }
+          mode === 'dev-prompt'
+            ? { ...(await timing.measure('context-wait-after-groq', () => contextPromise)), vocabulary }
+            : { vocabulary }
 
         if (payload.sessionId !== recordingSessionId || listening) return
 
         const processingStartedAtMs = performance.now()
-        finalOutput = await geminiProcessingService.process(
+        finalOutput = await timing.measure('gemini-total', () => geminiProcessingService.process(
           rawTranscript,
-          recordingProcessingMode,
-          processingContext
-        )
+          mode,
+          processingContext,
+          app.isPackaged ? undefined : (stage, durationMs) =>
+            logPtt('latency', { sessionId: payload.sessionId, mode, stage: `gemini-${stage}`, durationMs })
+        ))
         processingLatencyMs = performance.now() - processingStartedAtMs
         usedGemini = true
       } catch (error) {
@@ -919,11 +963,8 @@ async function transcribeRecording(payload: RecordingPayload): Promise<void> {
 
     if (payload.sessionId !== recordingSessionId || listening) return
 
-    // Ensure selection capture has restored the clipboard before insertion.
-    await contextPromise
-
-    if (payload.sessionId !== recordingSessionId || listening) return
-
+    timing.mark('final-output')
+    timing.span('release-to-final-output', 'release', 'final-output')
     const recordingMetrics = {
       recordingDurationMs: payload.durationMs,
       transcriptionLatencyMs,
@@ -936,17 +977,43 @@ async function transcribeRecording(payload: RecordingPayload): Promise<void> {
     if (lastMetricsSessionId !== payload.sessionId) {
       lastMetricsSessionId = payload.sessionId
       aggregateMetrics = addRecordingMetrics(aggregateMetrics, recordingMetrics)
-      saveSettings()
-      if (!app.isPackaged) logRecordingMetrics(recordingMetrics)
+      // Persist after dispatch/copy, not on the latency-critical pre-paste path.
+      if (!app.isPackaged) logRecordingMetrics(recordingMetrics, payload.sessionId)
     }
 
-    if (!app.isPackaged) console.info(`[output:${recordingProcessingMode}] ${finalOutput}`)
     setOverlay('transcript', finalOutput)
 
+    timing.mark('insertion-start')
     const insertionResult = await textInsertionService.insert(
       finalOutput,
-      recordingAutoPaste && recordingHasExternalTarget
+      shouldAutoPaste,
+      {
+        isCurrent,
+        onQueueReady: () => {
+          timing.mark('clipboard-ready')
+          timing.span('clipboard-queue', 'insertion-start', 'clipboard-ready')
+        },
+        onPasted: () => {
+          timing.mark('paste-dispatched')
+          timing.span('text-insertion', 'insertion-start', 'paste-dispatched')
+          timing.span('release-to-paste-dispatch', 'release', 'paste-dispatched')
+          if (!isCurrent()) return
+          if (overlayStyle === 'minimal') setOverlay('hidden')
+          else {
+            setOverlay('pasted', 'Pasted')
+            scheduleOverlayHide(payload.sessionId, 1_400)
+          }
+          setImmediate(() => saveSettings())
+        }
+      }
     )
+    timing.mark('insertion-finished')
+    timing.span('clipboard-transaction', 'insertion-start', 'insertion-finished')
+    if (insertionResult.status !== 'pasted') {
+      timing.span('text-insertion', 'insertion-start', 'insertion-finished')
+      if (insertionResult.status === 'copied') timing.span('release-to-copy', 'release', 'insertion-finished')
+      saveSettings()
+    }
 
     if (payload.sessionId !== recordingSessionId || listening) return
 
@@ -954,14 +1021,9 @@ async function transcribeRecording(payload: RecordingPayload): Promise<void> {
       console.info(
         `[insertion] Pasted; clipboard ${insertionResult.clipboardRestored ? 'restored' : 'not restored'}`
       )
-      if (overlayStyle === 'minimal') {
-        setOverlay('hidden')
-      } else {
-        setOverlay('pasted', 'Pasted')
-        scheduleOverlayHide(payload.sessionId, 1_400)
-      }
       return
     }
+    if (insertionResult.status === 'cancelled') return
 
     if (insertionResult.error) {
       console.error('[insertion] Auto-paste unavailable:', insertionResult.error)
@@ -1184,6 +1246,18 @@ function installIpcHandlers(): void {
     if (!payload || payload.sessionId !== recordingSessionId) return
     showOperationFailure(payload.sessionId, new Error(payload.message), 'Transcription failed', 'recording')
   })
+  ipcMain.on(IPC.discardRecording, (event, sessionId: unknown) => {
+    if (!isSettingsSender(event.sender.id) || !Number.isInteger(sessionId)) return
+    discardRecording(sessionId as number)
+  })
+  ipcMain.on(IPC.recordingDiagnostic, (event, payload: unknown) => {
+    if (app.isPackaged || !isSettingsSender(event.sender.id)) return
+    const diagnostic = sanitizeRecordingDiagnostic(payload)
+    if (diagnostic) {
+      logPtt(`renderer ${diagnostic.stage}`, { ...diagnostic })
+      recordingTiming?.recorder(diagnostic)
+    }
+  })
 }
 
 function configureMediaPermissions(): void {
@@ -1224,12 +1298,14 @@ void app.whenReady().then(async () => {
   developerVocabulary = savedSettings.developerVocabulary
   aggregateMetrics = savedSettings.aggregateMetrics
   hotkey = savedSettings.hotkey
+  hotkeyPreference = savedSettings.hotkeyPreference
   onboardingComplete = savedSettings.onboardingComplete
   if (!savedSettings.onboardingStateWasPresent) {
     // Existing development installs with both .env keys stay configured after this migration.
     onboardingComplete = providerCredentialsService.hasAllRequiredKeys()
-    saveSettings()
   }
+  // Persist the default/custom marker so future migrations preserve explicit choices.
+  saveSettings()
   console.info(`[mode] ${processingMode}`)
   console.info(`[auto-paste] ${autoPaste ? 'on' : 'off'}`)
   console.info(`[overlay] ${overlayStyle}`)
@@ -1247,10 +1323,16 @@ void app.whenReady().then(async () => {
     shortcut: hotkey,
     onPressed: () => void startListening('hotkey press'),
     onReleased: () => stopListening('hotkey release'),
-    onToggle: () => void toggleListening('hotkey toggle')
+    onNativeReleaseObserved: (atMs) => recordingTiming?.mark('native-release', atMs),
+    onToggle: () => void toggleListening('hotkey toggle'),
+    onStatusChanged: (status) => {
+      hotkeyMode = status.mode
+      hotkeyMessage = status.message
+      broadcastState()
+    }
   })
 
-  const status = hotkeyService.start()
+  const status = await hotkeyService.start()
   hotkeyMode = status.mode
   hotkeyMessage = status.message
   console.info(`[hotkey] ${status.message}`)

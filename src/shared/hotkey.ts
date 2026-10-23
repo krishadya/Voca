@@ -43,7 +43,8 @@ export const SUPPORTED_HOTKEY_KEYS = [
   'Z'
 ] as const
 
-export type HotkeyKey = (typeof SUPPORTED_HOTKEY_KEYS)[number]
+export type StandardHotkeyKey = (typeof SUPPORTED_HOTKEY_KEYS)[number]
+export type HotkeyKey = StandardHotkeyKey | 'FnControl'
 
 export interface HotkeyConfig {
   key: HotkeyKey
@@ -56,13 +57,18 @@ export interface HotkeyActionResult {
 }
 
 export const DEFAULT_HOTKEY: HotkeyConfig = {
+  key: 'FnControl',
+  modifiers: []
+}
+
+export const F8_HOTKEY: HotkeyConfig = {
   key: 'F8',
   modifiers: []
 }
 
-export const HOTKEY_USAGE_GUIDANCE = 'Use an F-key or a shortcut with ⌘, ⌥, ⌃, or ⇧.'
+export const HOTKEY_USAGE_GUIDANCE = 'Hold Fn + Control to talk; release either key to stop. F8 and custom shortcuts are also available.'
 export const HOTKEY_LIMITATION_NOTE =
-  'Fn/Globe and multi-key chords such as Space + P are not supported.'
+  'Fn + Control requires native keyboard access (Accessibility/Input Monitoring). If your keyboard does not expose Fn, select F8. Other modifier-only shortcuts and chords such as Space + P are unsupported.'
 
 const RESERVED_SHORTCUTS = new Set([
   'Command+Space',
@@ -77,7 +83,7 @@ const RESERVED_SHORTCUTS = new Set([
 ])
 
 function isHotkeyKey(value: unknown): value is HotkeyKey {
-  return SUPPORTED_HOTKEY_KEYS.includes(value as HotkeyKey)
+  return value === 'FnControl' || SUPPORTED_HOTKEY_KEYS.includes(value as StandardHotkeyKey)
 }
 
 function isHotkeyModifier(value: unknown): value is HotkeyModifier {
@@ -108,6 +114,9 @@ function signature(hotkey: HotkeyConfig): string {
 export function validateHotkey(hotkey: HotkeyConfig): string | null {
   if (!isHotkeyKey(hotkey.key)) return HOTKEY_USAGE_GUIDANCE
   if (!hotkey.modifiers.every(isHotkeyModifier)) return HOTKEY_USAGE_GUIDANCE
+  if (hotkey.key === 'FnControl') {
+    return hotkey.modifiers.length === 0 ? null : HOTKEY_USAGE_GUIDANCE
+  }
 
   const isFunctionKey = /^F(?:[1-9]|1[0-2])$/.test(hotkey.key)
   if (!isFunctionKey && hotkey.modifiers.length === 0) {
@@ -122,10 +131,12 @@ export function validateHotkey(hotkey: HotkeyConfig): string | null {
 }
 
 export function formatHotkey(hotkey: HotkeyConfig): string {
+  if (hotkey.key === 'FnControl') return 'Fn + Control'
   return [...hotkey.modifiers, hotkey.key].join(' + ')
 }
 
-export function hotkeyToAccelerator(hotkey: HotkeyConfig): string {
+export function hotkeyToAccelerator(hotkey: HotkeyConfig): string | null {
+  if (hotkey.key === 'FnControl') return null
   const modifiers = hotkey.modifiers.map((modifier) =>
     modifier === 'Option' ? 'Alt' : modifier
   )

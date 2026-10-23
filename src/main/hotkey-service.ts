@@ -1,4 +1,5 @@
-import { globalShortcut, systemPreferences } from 'electron'
+import { app, globalShortcut, systemPreferences } from 'electron'
+import { join } from 'node:path'
 import { uIOhook, UiohookKey } from 'uiohook-napi'
 import type { UiohookKeyboardEvent } from 'uiohook-napi'
 import type { HotkeyMode } from '../shared/ipc'
@@ -8,13 +9,17 @@ import {
   hotkeyToAccelerator,
   validateHotkey
 } from '../shared/hotkey'
-import type { HotkeyActionResult, HotkeyConfig, HotkeyModifier } from '../shared/hotkey'
+import type { HotkeyActionResult, HotkeyConfig, HotkeyModifier, StandardHotkeyKey } from '../shared/hotkey'
+import { FnControlMonitor, FN_ACCESS_MESSAGE } from './fn-control-monitor'
+import { logPtt } from './ptt-diagnostics'
 
 interface HotkeyServiceOptions {
   shortcut: HotkeyConfig
   onPressed: () => void
   onReleased: () => void
   onToggle: () => void
+  onStatusChanged: (status: HotkeyStatus) => void
+  onNativeReleaseObserved?: (atMs: number) => void
 }
 
 export interface HotkeyStatus {
@@ -22,7 +27,7 @@ export interface HotkeyStatus {
   message: string
 }
 
-const KEY_CODES: Record<HotkeyConfig['key'], number> = {
+const KEY_CODES: Record<StandardHotkeyKey, number> = {
   F1: UiohookKey.F1,
   F2: UiohookKey.F2,
   F3: UiohookKey.F3,
@@ -94,21 +99,64 @@ export class HotkeyService {
   private suspended = false
   private usingNativeHook = false
   private started = false
+  private reconfiguring = false
+  private readonly fnMonitor: FnControlMonitor
+
+  private readonly onKeyDown = (event: UiohookKeyboardEvent): void => {
+    if (this.shortcut.key === 'FnControl' || this.suspended || this.held) return
+    if (event.keycode !== KEY_CODES[this.shortcut.key]) return
+    if (!modifiersMatch(event, this.shortcut)) return
+    this.updateHeld(true)
+  }
+
+  private readonly onKeyUp = (event: UiohookKeyboardEvent): void => {
+    if (this.shortcut.key === 'FnControl' || !this.held) return
+    const mainKeyReleased = event.keycode === KEY_CODES[this.shortcut.key]
+    const requiredModifierReleased = this.shortcut.modifiers.some((modifier) =>
+      MODIFIER_KEY_CODES[modifier].includes(event.keycode)
+    )
+    if (mainKeyReleased || requiredModifierReleased) this.updateHeld(false)
+  }
 
   constructor(private readonly options: HotkeyServiceOptions) {
     this.shortcut = copyHotkey(options.shortcut)
+    const executable = app.isPackaged
+      ? join(process.resourcesPath, 'voca-fn-control')
+      : join(__dirname, '../../build/native/voca-fn-control')
+    this.fnMonitor = new FnControlMonitor(executable, (held) => {
+      if (this.shortcut.key !== 'FnControl') return
+      if (held && (this.suspended || this.reconfiguring)) return
+      this.updateHeld(held)
+    }, () => {
+      if (this.started && this.shortcut.key === 'FnControl') this.publishStatus()
+    }, app.isPackaged ? undefined : (event) => {
+      // Diagnostics only: keep the native protocol and chord state untouched.
+      const release = /^native timeMs=(\d+).* transition=-1$/.exec(event)
+      if (release) this.options.onNativeReleaseObserved?.(Number(release[1]))
+      logPtt(event)
+    })
   }
 
-  start(): HotkeyStatus {
+  async start(): Promise<HotkeyStatus> {
     this.started = true
 
+    if (this.shortcut.key === 'FnControl') {
+      if (process.platform === 'darwin') await this.fnMonitor.start()
+      return this.currentStatus()
+    }
+
+    this.startStandardShortcut()
+    return this.currentStatus()
+  }
+
+  private startStandardShortcut(): void {
     if (process.platform === 'darwin') {
       const accessibilityGranted = systemPreferences.isTrustedAccessibilityClient(true)
 
       if (accessibilityGranted) {
         try {
           this.startNativeHook()
-          return this.currentStatus()
+          return
         } catch (error) {
           console.warn('[hotkey] Native hook failed; using toggle fallback.', error)
         }
@@ -118,22 +166,26 @@ export class HotkeyService {
     }
 
     this.registerToggleFallback()
-    return this.currentStatus()
   }
 
   suspend(): void {
     if (this.suspended) return
     this.suspended = true
-    this.held = false
+    this.updateHeld(false)
 
     if (!this.usingNativeHook) {
-      globalShortcut.unregister(hotkeyToAccelerator(this.shortcut))
+      const accelerator = hotkeyToAccelerator(this.shortcut)
+      if (accelerator) globalShortcut.unregister(accelerator)
     }
   }
 
   resume(): HotkeyActionResult {
     if (!this.suspended) return { success: true, message: this.currentStatus().message }
     this.suspended = false
+
+    if (this.shortcut.key === 'FnControl') {
+      return { success: this.fnMonitor.ready, message: this.currentStatus().message }
+    }
 
     if (!this.usingNativeHook && !this.registerToggleFallback()) {
       return {
@@ -145,7 +197,8 @@ export class HotkeyService {
     return { success: true, message: this.currentStatus().message }
   }
 
-  reconfigure(nextShortcut: HotkeyConfig): HotkeyActionResult {
+  async reconfigure(nextShortcut: HotkeyConfig): Promise<HotkeyActionResult> {
+    if (this.reconfiguring) return { success: false, message: 'A shortcut change is already in progress.' }
     const validationError = validateHotkey(nextShortcut)
     if (validationError) {
       const resumeResult = this.resume()
@@ -158,15 +211,50 @@ export class HotkeyService {
     const previousShortcut = this.shortcut
     const wasSuspended = this.suspended
 
-    if (this.usingNativeHook) {
+    if (nextShortcut.key === 'FnControl') {
+      this.reconfiguring = true
+      this.suspend()
+      const ready = process.platform === 'darwin' && await this.fnMonitor.start()
+      this.reconfiguring = false
+      if (!this.started) return { success: false, message: 'Voca is shutting down.' }
+      if (!ready) {
+        this.resume()
+        this.publishStatus()
+        return { success: false, message: FN_ACCESS_MESSAGE }
+      }
+      this.stopStandardShortcut()
       this.shortcut = copyHotkey(nextShortcut)
       this.suspended = false
-      this.held = false
+      this.publishStatus()
       return { success: true, message: this.currentStatus().message }
     }
 
-    const previousAccelerator = hotkeyToAccelerator(previousShortcut)
-    const nextAccelerator = hotkeyToAccelerator(nextShortcut)
+    if (previousShortcut.key === 'FnControl') {
+      this.suspend()
+      this.shortcut = copyHotkey(nextShortcut)
+      this.suspended = false
+      this.startStandardShortcut()
+      const accelerator = hotkeyToAccelerator(nextShortcut)!
+      if (!this.usingNativeHook && !globalShortcut.isRegistered(accelerator)) {
+        this.shortcut = previousShortcut
+        this.publishStatus()
+        return { success: false, message: `${formatHotkey(nextShortcut)} could not be registered.` }
+      }
+      this.fnMonitor.stop()
+      this.publishStatus()
+      return { success: true, message: this.currentStatus().message }
+    }
+
+    if (this.usingNativeHook) {
+      this.shortcut = copyHotkey(nextShortcut)
+      this.suspended = false
+      this.updateHeld(false)
+      this.publishStatus()
+      return { success: true, message: this.currentStatus().message }
+    }
+
+    const previousAccelerator = hotkeyToAccelerator(previousShortcut)!
+    const nextAccelerator = hotkeyToAccelerator(nextShortcut)!
 
     if (!wasSuspended && previousAccelerator === nextAccelerator) {
       return { success: true, message: this.currentStatus().message }
@@ -193,32 +281,44 @@ export class HotkeyService {
     if (!wasSuspended) globalShortcut.unregister(previousAccelerator)
     this.shortcut = copyHotkey(nextShortcut)
     this.suspended = false
+    this.publishStatus()
     return { success: true, message: this.currentStatus().message }
   }
 
   stop(): void {
+    this.started = false
+    this.updateHeld(false)
+    this.fnMonitor.stop()
+    this.stopStandardShortcut()
+    this.suspended = false
+  }
+
+  private stopStandardShortcut(): void {
     if (this.usingNativeHook) {
-      uIOhook.removeAllListeners('keydown')
-      uIOhook.removeAllListeners('keyup')
+      uIOhook.off('keydown', this.onKeyDown)
+      uIOhook.off('keyup', this.onKeyUp)
       uIOhook.stop()
       this.usingNativeHook = false
     } else {
-      globalShortcut.unregister(hotkeyToAccelerator(this.shortcut))
+      const accelerator = hotkeyToAccelerator(this.shortcut)
+      if (accelerator) globalShortcut.unregister(accelerator)
     }
-
-    this.started = false
-    this.suspended = false
-    this.held = false
   }
 
   private currentStatus(): HotkeyStatus {
     const display = formatHotkey(this.shortcut)
 
+    if (this.shortcut.key === 'FnControl') {
+      return this.fnMonitor.ready
+        ? { mode: 'hold', message: 'Hold Fn + Control to talk; release either key to stop' }
+        : { mode: 'unavailable', message: FN_ACCESS_MESSAGE }
+    }
+
     if (this.usingNativeHook) {
       return { mode: 'hold', message: `Hold ${display} to talk` }
     }
 
-    const registered = globalShortcut.isRegistered(hotkeyToAccelerator(this.shortcut))
+    const registered = globalShortcut.isRegistered(hotkeyToAccelerator(this.shortcut)!)
     return {
       mode: 'toggle',
       message: registered
@@ -228,35 +328,34 @@ export class HotkeyService {
   }
 
   private startNativeHook(): void {
-    uIOhook.on('keydown', (event) => {
-      if (this.suspended || this.held) return
-      if (event.keycode !== KEY_CODES[this.shortcut.key]) return
-      if (!modifiersMatch(event, this.shortcut)) return
+    uIOhook.on('keydown', this.onKeyDown)
+    uIOhook.on('keyup', this.onKeyUp)
+    try {
+      uIOhook.start()
+      this.usingNativeHook = true
+    } catch (error) {
+      uIOhook.off('keydown', this.onKeyDown)
+      uIOhook.off('keyup', this.onKeyUp)
+      throw error
+    }
+  }
 
-      this.held = true
-      this.options.onPressed()
-    })
+  private updateHeld(held: boolean): void {
+    if (this.held === held) return
+    this.held = held
+    logPtt(held ? 'hotkey PTT_DOWN' : 'hotkey PTT_UP', { shortcut: formatHotkey(this.shortcut) })
+    if (held) this.options.onPressed()
+    else this.options.onReleased()
+  }
 
-    uIOhook.on('keyup', (event) => {
-      if (!this.held) return
-
-      const mainKeyReleased = event.keycode === KEY_CODES[this.shortcut.key]
-      const requiredModifierReleased = this.shortcut.modifiers.some((modifier) =>
-        MODIFIER_KEY_CODES[modifier].includes(event.keycode)
-      )
-      if (!mainKeyReleased && !requiredModifierReleased) return
-
-      this.held = false
-      this.options.onReleased()
-    })
-
-    uIOhook.start()
-    this.usingNativeHook = true
+  private publishStatus(): void {
+    this.options.onStatusChanged(this.currentStatus())
   }
 
   private registerToggleFallback(): boolean {
     if (!this.started || this.suspended) return false
     const accelerator = hotkeyToAccelerator(this.shortcut)
+    if (!accelerator) return false
     if (globalShortcut.isRegistered(accelerator)) return true
     return globalShortcut.register(accelerator, this.options.onToggle)
   }

@@ -46,7 +46,7 @@ See Voca go from **speech → transcription → developer intent → automatic i
 
 ## Features
 
-- Configurable global hold-to-talk shortcut with an F8 default
+- Configurable global hold-to-talk shortcut with a Fn + Control default; F8 remains selectable
 - Groq `whisper-large-v3-turbo` transcription
 - Raw, Clean, and Dev Prompt processing modes
 - Active-app and selected-text context for developer prompts
@@ -161,6 +161,25 @@ The latest release, **Voca v0.1.2**, is available for both Apple Silicon and Int
 3. Launch Voca and complete onboarding with your own Groq and Gemini API keys.
 4. Grant **Microphone** and **Accessibility** permission. Some Macs may also require **Input Monitoring**.
 
+### Push-to-talk shortcut
+
+Hold **Fn + Control** to record, then release either key to stop. Either Control key works,
+and F8 does not need to be held. The Fn shortcut is hold-only: it never falls back to toggling.
+Select **Fn + Control (default)**, **Use F8**, or **Change** in General Settings or onboarding.
+If your keyboard does not expose macOS Fn/Globe events, use F8 or another supported shortcut.
+F8 and custom shortcuts retain their existing Accessibility-dependent hold/toggle fallback.
+
+Fn + Control uses a passive macOS keyboard listener. If access is unavailable, Voca shows
+a permission message instead of registering a toggle. Enable Accessibility/Input Monitoring
+for Voca (or the development app/helper if macOS lists it), then select **Fn + Control (default)**
+to retry. macOS Fn/Globe actions remain active; set “Press Fn/Globe key to” to “Do Nothing”
+in Keyboard settings if its system action interferes.
+
+New profiles use Fn + Control. Settings without a shortcut, or explicitly marked as using
+the default, migrate automatically. Legacy saved F8 choices are ambiguous because older
+versions did not record whether they were customized; they are preserved. Select the new
+default once to switch. Explicit custom shortcuts, including F8, stay saved across restarts.
+
 ### Gatekeeper
 
 The current build is unsigned and not notarized.
@@ -173,7 +192,9 @@ If it is still blocked, go to:
 
 ## Development
 
-Requires macOS, Node.js 22.12 or newer, and npm.
+Requires macOS, Node.js 22.12 or newer, npm, and Xcode Command Line Tools (`xcode-select --install`).
+`npm run dev` and `npm run build` compile the passive Fn listener for both arm64 and x64;
+packaging includes this universal executable alongside the app.
 
 ```bash
 git clone https://github.com/krishadya/Voca.git
@@ -190,12 +211,23 @@ npm run typecheck
 npm run build
 ```
 
+Shortcut regression checks: `npm run test:hotkeys`. On Apple Silicon with Rosetta,
+`npm run test:hotkeys -- --x64` also executes the tests as x64. This is not a substitute
+for testing real keyboards on an Intel Mac.
+
+Before releasing the new default, manually test on both Apple Silicon and Intel:
+Fn-first and Control-first presses, release either key first, short taps, repeated
+dictations, fullscreen apps, permission denial/recovery, and switching between
+Fn + Control, F8, and a custom shortcut. Verify a fresh profile defaults to Fn + Control
+and a saved custom shortcut survives restarting. Test an external keyboard without
+macOS Fn events using the F8 alternative.
+
 ## Known limitations
 
 - macOS only
 - The app and DMG are unsigned and not notarized
 - Groq and Gemini require internet access and user-provided API keys
-- Fn/Globe and arbitrary multi-key chords such as `Space + P` are not supported as shortcuts
+- Fn + Control requires a keyboard that exposes macOS Fn events; Fn alone and arbitrary chords such as `Space + P` are unsupported
 
 ## Tech stack
 

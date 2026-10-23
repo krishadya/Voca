@@ -3,6 +3,7 @@ out/
 release/
 dist/
 build/voca.iconset/
+build/native/
 .DS_Store
 *.log
 .env

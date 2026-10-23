@@ -85,15 +85,15 @@ export function countWords(text: string): number {
   return trimmed ? trimmed.split(/\s+/u).length : 0
 }
 
-export function logRecordingMetrics(metrics: RecordingMetrics): void {
+export function logRecordingMetrics(metrics: RecordingMetrics, sessionId?: number): void {
   const processing = metrics.usedGemini
     ? `${Math.round(metrics.processingLatencyMs)}ms`
     : 'n/a (Raw)'
 
-  console.info(`[metrics]
+  console.info(`[metrics${sessionId === undefined ? '' : ` session=${sessionId}`}]
 recording: ${(metrics.recordingDurationMs / 1_000).toFixed(1)}s
 transcription: ${Math.round(metrics.transcriptionLatencyMs)}ms
 processing: ${processing}
-total after release: ${Math.round(metrics.totalLatencyMs)}ms
+release to final output (before insertion): ${Math.round(metrics.totalLatencyMs)}ms
 words: ${metrics.wordCount}`)
 }
