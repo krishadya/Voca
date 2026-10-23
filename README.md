@@ -151,10 +151,10 @@ Relevant audio, text, and context are still sent to the configured provider APIs
 
 ## Installation
 
-The latest release, **Voca v0.1.2**, is available for both Apple Silicon and Intel Macs:
+The latest release, **Voca v0.1.3**, is available for both Apple Silicon and Intel Macs:
 
-- Apple Silicon Macs: `Voca-0.1.2-arm64.dmg`
-- Intel Macs: `Voca-0.1.2-x64.dmg`
+- Apple Silicon Macs: `Voca-0.1.3-arm64.dmg`
+- Intel Macs: `Voca-0.1.3-x64.dmg`
 
 1. Download the latest DMG from [GitHub Releases](https://github.com/krishadya/Voca/releases/latest).
 2. Open it and drag **Voca** into **Applications**.
