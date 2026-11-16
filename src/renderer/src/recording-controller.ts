@@ -31,6 +31,7 @@ export class RecordingController {
   update(listening: boolean, sessionId: number): void {
     if (!listening) {
       if (this.current?.id === sessionId) this.stop(this.current)
+      else if (this.current && sessionId > this.current.id) this.dispose()
       return
     }
     if (this.current?.id === sessionId) return

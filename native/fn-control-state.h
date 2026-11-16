@@ -8,6 +8,17 @@
 typedef enum { VOCA_OTHER_MODIFIER, VOCA_FN, VOCA_CONTROL } VocaModifier;
 typedef struct { bool fn; bool control; bool held; uint64_t timestamp; } VocaFnControlState;
 
+// Startup/recovery gate only; the physical chord reducer below is unchanged.
+typedef struct { bool waiting; bool fn; bool control; } VocaReleaseGate;
+static bool voca_wait_for_release(VocaReleaseGate *gate, VocaModifier modifier,
+                                  bool fn_flag, bool control_flag) {
+    if (!gate->waiting) return false;
+    if (modifier == VOCA_FN) gate->fn = fn_flag;
+    if (modifier == VOCA_CONTROL) gate->control = control_flag;
+    if (!gate->fn && !gate->control) gate->waiting = false;
+    return true; // The last release clears the gate, but cannot arm a chord.
+}
+
 static int voca_update_chord(VocaFnControlState *state, VocaModifier modifier,
                              bool fn_flag, bool control_flag, uint64_t timestamp) {
     // Synthetic Command+C carries Command-only flags even while the physical

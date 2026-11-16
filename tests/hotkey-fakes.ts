@@ -25,12 +25,24 @@ export const UiohookKey = new Proxy({} as Record<string, number>, {
 export class FnControlMonitor {
   static current: FnControlMonitor
   ready = false
+  starts = 0
+  forceStarts = 0
+  pendingStart: Promise<boolean> | null = null
+  private generation = 0
   constructor(_path: string, readonly onChange: (held: boolean) => void, readonly onFailure: () => void) {
     FnControlMonitor.current = this
   }
-  async start(): Promise<boolean> { this.ready = access.fnReady; return this.ready }
-  stop(): void { this.ready = false }
-  fail(): void { this.ready = false; this.onChange(false); this.onFailure() }
+  async start(force = false): Promise<boolean> {
+    this.starts++
+    if (force) this.forceStarts++
+    const generation = ++this.generation
+    const ready = this.pendingStart ? await this.pendingStart : access.fnReady
+    if (generation !== this.generation) return false
+    this.ready = ready
+    return ready
+  }
+  async stop(): Promise<void> { ++this.generation; this.ready = false }
+  fail(): void { this.ready = false; this.onFailure() }
 }
 export const FN_ACCESS_MESSAGE = 'Fn + Control needs native keyboard access. Select F8.'
 

@@ -206,6 +206,29 @@ test('Groq rejects empty audio before accessing keys or making requests', async 
     (error: unknown) => error instanceof TranscriptionError && error.category === 'empty-audio')
 })
 
+test('sleep cancellation invalidates the session, releases the microphone, and never uploads partial audio', async () => {
+  for (const initializing of [true, false]) {
+    const h = harness()
+    h.controller.update(true, 10)
+    if (!initializing) await h.ready(0)
+    // Main increments the session ID and broadcasts listening=false on sleep.
+    h.controller.update(false, 11)
+    if (initializing) await h.ready(0)
+    else h.recorders[0].complete()
+    await flush()
+    assert.equal(h.stoppedTracks(), 1)
+    assert.deepEqual(h.completed, [])
+    assert.deepEqual(h.errors, [])
+    h.controller.update(true, 12)
+    await h.ready(1)
+    h.advance(250)
+    h.controller.update(false, 12)
+    h.recorders.at(-1)!.complete()
+    await flush()
+    assert.deepEqual(h.completed.map((payload) => payload.sessionId), [12])
+  }
+})
+
 test('Groq errors retain category/status but never provider body; no retries', async (t) => {
   const cases = [
     { fetch: async () => new Response(JSON.stringify({ error: { message: 'PRIVATE CONTENT' } }), { status: 400 }), category: 'http', status: 400 },

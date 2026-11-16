@@ -34,6 +34,26 @@ int main(void) {
     assert(!state.held && state.control);
     modifier(kVK_RightControl, 0, 10);
     assert(!state.control);
+    release_gate = (VocaReleaseGate){true, true, true};
+    modifier(kVK_Control, kCGEventFlagMaskControl, 11);
+    modifier(kVK_Function, kCGEventFlagMaskSecondaryFn, 12);
+    assert(!state.held);
+    modifier(kVK_Command, 0, 13);
+    assert(release_gate.waiting);
+    modifier(kVK_Function, 0, 14);
+    modifier(kVK_Control, 0, 15);
+    assert(!release_gate.waiting);
+    modifier(kVK_Function, kCGEventFlagMaskSecondaryFn, 16);
+    modifier(kVK_Control, kCGEventFlagMaskControl, 17);
+    assert(state.held);
+    handle_event(NULL, kCGEventTapDisabledByTimeout, NULL, NULL);
+    assert(unavailable && !state.held);
+    // A disabled tap never emits a normal release or accepts another chord.
+    modifier(kVK_Function, kCGEventFlagMaskSecondaryFn, 18);
+    assert(!state.held);
+    unavailable = false;
+    handle_event(NULL, kCGEventTapDisabledByUserInput, NULL, NULL);
+    assert(unavailable);
     puts("Native CGEvent callback tests passed (no global event injection)");
     return 0;
 }

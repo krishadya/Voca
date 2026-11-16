@@ -7,6 +7,7 @@ import {
   dialog,
   ipcMain,
   Menu,
+  powerMonitor,
   screen,
   session,
   shell,
@@ -96,6 +97,7 @@ let hotkeyService: HotkeyService | null = null
 let settingsStore: SettingsStore | null = null
 let providerCredentialsService: ProviderCredentialsService | null = null
 let listening = false
+let systemSleeping = false
 let pendingStartToken: number | null = null
 let transitionToken = 0
 let hotkeyMode: HotkeyMode = 'unavailable'
@@ -820,7 +822,7 @@ async function ensureMicrophonePermission(): Promise<boolean> {
 
 async function startListening(source: string): Promise<void> {
   logPtt('recording start requested', { source, listening, pending: pendingStartToken !== null })
-  if (listening || pendingStartToken !== null || hotkeyCaptureActive || hotkeyChangePending) return
+  if (quitting || systemSleeping || listening || pendingStartToken !== null || hotkeyCaptureActive || hotkeyChangePending) return
 
   const token = ++transitionToken
   pendingStartToken = token
@@ -842,6 +844,36 @@ async function startListening(source: string): Promise<void> {
   }
 
   setListening(true, source)
+}
+
+function cancelInterruptedRecording(): void {
+  // Invalidate before broadcasting false so neither pending getUserMedia nor
+  // an old stop/blob/provider response can be mistaken for a completed session.
+  ++transitionToken
+  pendingStartToken = null
+  recordingSessionId += 1
+  listening = false
+  recordingContextPromise = Promise.resolve({})
+  clearRecordingDeliveryTimer()
+  clearOverlayHideTimer()
+  setOverlay('hidden')
+  logPtt('recording cancelled by interruption', { sessionId: recordingSessionId })
+}
+
+function onSystemSuspend(): void {
+  if (quitting || systemSleeping) return
+  systemSleeping = true
+  logPtt('system suspend', { shortcut: formatHotkey(hotkey) })
+  cancelInterruptedRecording()
+  hotkeyCaptureActive = false
+  hotkeyService?.systemSuspend()
+}
+
+function onSystemResume(): void {
+  if (quitting) return
+  systemSleeping = false
+  logPtt('system resume', { shortcut: formatHotkey(hotkey) })
+  hotkeyService?.systemResume()
 }
 
 function stopListening(source: string): void {
@@ -1323,6 +1355,9 @@ void app.whenReady().then(async () => {
     shortcut: hotkey,
     onPressed: () => void startListening('hotkey press'),
     onReleased: () => stopListening('hotkey release'),
+    onInterrupted: () => {
+      if (listening || pendingStartToken !== null) cancelInterruptedRecording()
+    },
     onNativeReleaseObserved: (atMs) => recordingTiming?.mark('native-release', atMs),
     onToggle: () => void toggleListening('hotkey toggle'),
     onStatusChanged: (status) => {
@@ -1332,6 +1367,10 @@ void app.whenReady().then(async () => {
     }
   })
 
+  if (process.platform === 'darwin') {
+    powerMonitor.on('suspend', onSystemSuspend)
+    powerMonitor.on('resume', onSystemResume)
+  }
   const status = await hotkeyService.start()
   hotkeyMode = status.mode
   hotkeyMessage = status.message
@@ -1345,6 +1384,10 @@ void app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   quitting = true
+  powerMonitor.removeListener('suspend', onSystemSuspend)
+  powerMonitor.removeListener('resume', onSystemResume)
+  // Cancel before stopping the hook; shutdown is never a normal PTT release.
+  cancelInterruptedRecording()
   clearRecordingDeliveryTimer()
   clearOverlayHideTimer()
   destroyOverlayPanel('app quit')

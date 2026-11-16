@@ -10,6 +10,7 @@ import { FnControlMonitor as RealMonitor } from '../src/main/fn-control-monitor'
 import { access, FnControlMonitor, globalShortcut, uIOhook, UiohookKey } from './hotkey-fakes'
 import './recording.test'
 import './latency.test'
+import './recovery.test'
 
 test('default, serialization, validation, and native-only accelerator', () => {
   assert.equal(formatHotkey(DEFAULT_HOTKEY), 'Fn + Control')
@@ -56,7 +57,8 @@ test('Fn hold/release, F8 switching, custom shortcut, capture, failure and fallb
   const service = new HotkeyService({
     shortcut: DEFAULT_HOTKEY,
     onPressed: () => events.push('press'), onReleased: () => events.push('release'),
-    onToggle: () => events.push('toggled'), onStatusChanged: (status) => events.push(status.mode)
+    onToggle: () => events.push('toggled'), onStatusChanged: (status) => events.push(status.mode),
+    onInterrupted: () => events.push('cancel')
   })
   const key = (keycode: number, ctrlKey = false) => ({ keycode, ctrlKey, altKey: false, metaKey: false, shiftKey: false })
   try {
@@ -69,7 +71,7 @@ test('Fn hold/release, F8 switching, custom shortcut, capture, failure and fallb
     service.suspend(); fn.onChange(true); fn.onChange(false); service.resume()
     assert.deepEqual(events, [])
     fn.onChange(true); fn.fail()
-    assert.deepEqual(events, ['press', 'release', 'unavailable'])
+    assert.deepEqual(events, ['press', 'cancel', 'unavailable'])
     events.length = 0
     assert.equal((await service.reconfigure(F8_HOTKEY)).success, true)
     assert.equal(uIOhook.listenerCount('keydown'), 1)

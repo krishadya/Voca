@@ -20,12 +20,17 @@ interface HotkeyServiceOptions {
   onToggle: () => void
   onStatusChanged: (status: HotkeyStatus) => void
   onNativeReleaseObserved?: (atMs: number) => void
+  onInterrupted?: () => void
 }
 
 export interface HotkeyStatus {
   mode: HotkeyMode
   message: string
 }
+
+// Four attempts per failure episode; a healthy 30s run resets the crash budget.
+const RECOVERY_DELAYS_MS = [500, 1000, 2000, 4000] as const
+const WAKE_SETTLE_MS = 750
 
 const KEY_CODES: Record<StandardHotkeyKey, number> = {
   F1: UiohookKey.F1,
@@ -100,17 +105,24 @@ export class HotkeyService {
   private usingNativeHook = false
   private started = false
   private reconfiguring = false
+  private sleeping = false
+  private lifecycle = 0
+  private recoveryEpoch = 0
+  private recoveryTimer: ReturnType<typeof setTimeout> | null = null
+  private recovering = false
+  private recoveryAttempts = 0
+  private readySince = 0
   private readonly fnMonitor: FnControlMonitor
 
   private readonly onKeyDown = (event: UiohookKeyboardEvent): void => {
-    if (this.shortcut.key === 'FnControl' || this.suspended || this.held) return
+    if (!this.started || this.sleeping || this.shortcut.key === 'FnControl' || this.suspended || this.held) return
     if (event.keycode !== KEY_CODES[this.shortcut.key]) return
     if (!modifiersMatch(event, this.shortcut)) return
     this.updateHeld(true)
   }
 
   private readonly onKeyUp = (event: UiohookKeyboardEvent): void => {
-    if (this.shortcut.key === 'FnControl' || !this.held) return
+    if (this.sleeping || this.shortcut.key === 'FnControl' || !this.held) return
     const mainKeyReleased = event.keycode === KEY_CODES[this.shortcut.key]
     const requiredModifierReleased = this.shortcut.modifiers.some((modifier) =>
       MODIFIER_KEY_CODES[modifier].includes(event.keycode)
@@ -124,11 +136,14 @@ export class HotkeyService {
       ? join(process.resourcesPath, 'voca-fn-control')
       : join(__dirname, '../../build/native/voca-fn-control')
     this.fnMonitor = new FnControlMonitor(executable, (held) => {
-      if (this.shortcut.key !== 'FnControl') return
+      if (!this.started || this.sleeping || this.shortcut.key !== 'FnControl') return
       if (held && (this.suspended || this.reconfiguring)) return
       this.updateHeld(held)
     }, () => {
-      if (this.started && this.shortcut.key === 'FnControl') this.publishStatus()
+      if (!this.started || this.sleeping || this.shortcut.key !== 'FnControl') return
+      this.resetHeld('native listener lost')
+      this.publishStatus()
+      if (!this.reconfiguring) this.recover('helper failure')
     }, app.isPackaged ? undefined : (event) => {
       // Diagnostics only: keep the native protocol and chord state untouched.
       const release = /^native timeMs=(\d+).* transition=-1$/.exec(event)
@@ -141,12 +156,99 @@ export class HotkeyService {
     this.started = true
 
     if (this.shortcut.key === 'FnControl') {
-      if (process.platform === 'darwin') await this.fnMonitor.start()
+      if (process.platform === 'darwin') {
+        const ready = await this.fnMonitor.start()
+        if (ready) this.readySince = Date.now()
+        else this.recover('initial start failed')
+      }
       return this.currentStatus()
     }
 
     this.startStandardShortcut()
     return this.currentStatus()
+  }
+
+  systemSuspend(): void {
+    if (!this.started || this.sleeping) return
+    this.sleeping = true
+    ++this.lifecycle
+    this.reconfiguring = false
+    this.suspended = false
+    this.cancelRecovery()
+    this.resetHeld('system suspend')
+    void this.fnMonitor.stop()
+    this.publishStatus()
+  }
+
+  systemResume(): void {
+    if (!this.started) return
+    this.sleeping = false
+    ++this.lifecycle
+    this.reconfiguring = false
+    this.suspended = false
+    this.cancelRecovery()
+    this.resetHeld('system resume')
+    if (this.shortcut.key !== 'FnControl') {
+      if (!this.usingNativeHook) this.registerToggleFallback()
+      return
+    }
+    // Recreate even if the old process reports ready/alive: those are not proof
+    // that its event tap is still delivering keyboard events after a Space/wake.
+    void this.fnMonitor.stop()
+    this.recoveryAttempts = 0
+    this.readySince = 0
+    this.recover('system resume', WAKE_SETTLE_MS)
+  }
+
+  private resetHeld(reason: string): void {
+    const wasHeld = this.held
+    this.held = false
+    logPtt('recording held-state reset', { reason, wasHeld, shortcut: formatHotkey(this.shortcut) })
+    if (wasHeld) this.options.onInterrupted?.()
+  }
+
+  private cancelRecovery(): void {
+    ++this.recoveryEpoch
+    if (this.recoveryTimer) clearTimeout(this.recoveryTimer)
+    this.recoveryTimer = null
+    this.recovering = false
+  }
+
+  private recover(reason: string, firstDelay?: number): void {
+    if (!this.started || this.sleeping || this.shortcut.key !== 'FnControl' || this.recovering) return
+    if (this.readySince && Date.now() - this.readySince >= 30_000) this.recoveryAttempts = 0
+    this.readySince = 0
+    const epoch = ++this.recoveryEpoch
+    this.recovering = true
+    const eligible = (): boolean => epoch === this.recoveryEpoch && this.started &&
+      !this.sleeping && !this.reconfiguring && this.shortcut.key === 'FnControl'
+    const schedule = (delay?: number): void => {
+      if (!eligible()) return
+      if (this.recoveryAttempts >= RECOVERY_DELAYS_MS.length) {
+        this.recovering = false
+        logPtt('automatic recovery exhausted', { shortcut: formatHotkey(this.shortcut), attempts: this.recoveryAttempts })
+        this.publishStatus()
+        return
+      }
+      this.recoveryTimer = setTimeout(() => {
+        this.recoveryTimer = null
+        if (!eligible()) return
+        ++this.recoveryAttempts
+        logPtt('automatic recovery attempt', { reason, attempt: this.recoveryAttempts, shortcut: formatHotkey(this.shortcut) })
+        void this.fnMonitor.start(true).then((ready) => {
+          if (!eligible()) return
+          logPtt(ready ? 'automatic recovery success' : 'automatic recovery failure', {
+            attempt: this.recoveryAttempts, shortcut: formatHotkey(this.shortcut)
+          })
+          if (ready) {
+            this.recovering = false
+            this.readySince = Date.now()
+            this.publishStatus()
+          } else schedule()
+        })
+      }, delay ?? RECOVERY_DELAYS_MS[this.recoveryAttempts])
+    }
+    schedule(firstDelay)
   }
 
   private startStandardShortcut(): void {
@@ -198,6 +300,7 @@ export class HotkeyService {
   }
 
   async reconfigure(nextShortcut: HotkeyConfig): Promise<HotkeyActionResult> {
+    if (!this.started || this.sleeping) return { success: false, message: 'Wait until Voca is awake to change shortcuts.' }
     if (this.reconfiguring) return { success: false, message: 'A shortcut change is already in progress.' }
     const validationError = validateHotkey(nextShortcut)
     if (validationError) {
@@ -210,37 +313,51 @@ export class HotkeyService {
 
     const previousShortcut = this.shortcut
     const wasSuspended = this.suspended
+    const lifecycle = ++this.lifecycle
+    this.cancelRecovery()
+    this.recoveryAttempts = 0
+    this.readySince = 0
 
     if (nextShortcut.key === 'FnControl') {
       this.reconfiguring = true
       this.suspend()
-      const ready = process.platform === 'darwin' && await this.fnMonitor.start()
+      const ready = process.platform === 'darwin' && await this.fnMonitor.start(true)
+      if (!this.started || this.sleeping || lifecycle !== this.lifecycle) {
+        return { success: false, message: 'Shortcut change interrupted; try again when Voca is awake.' }
+      }
       this.reconfiguring = false
-      if (!this.started) return { success: false, message: 'Voca is shutting down.' }
       if (!ready) {
         this.resume()
         this.publishStatus()
+        if (previousShortcut.key === 'FnControl') this.recover('manual restart failed')
         return { success: false, message: FN_ACCESS_MESSAGE }
       }
       this.stopStandardShortcut()
       this.shortcut = copyHotkey(nextShortcut)
       this.suspended = false
+      this.readySince = Date.now()
       this.publishStatus()
       return { success: true, message: this.currentStatus().message }
     }
 
     if (previousShortcut.key === 'FnControl') {
+      this.reconfiguring = true
       this.suspend()
+      await this.fnMonitor.stop()
+      if (!this.started || this.sleeping || lifecycle !== this.lifecycle) {
+        return { success: false, message: 'Shortcut change interrupted; try again when Voca is awake.' }
+      }
+      this.reconfiguring = false
       this.shortcut = copyHotkey(nextShortcut)
       this.suspended = false
       this.startStandardShortcut()
       const accelerator = hotkeyToAccelerator(nextShortcut)!
       if (!this.usingNativeHook && !globalShortcut.isRegistered(accelerator)) {
         this.shortcut = previousShortcut
+        this.recover('restore previous shortcut')
         this.publishStatus()
         return { success: false, message: `${formatHotkey(nextShortcut)} could not be registered.` }
       }
-      this.fnMonitor.stop()
       this.publishStatus()
       return { success: true, message: this.currentStatus().message }
     }
@@ -287,8 +404,10 @@ export class HotkeyService {
 
   stop(): void {
     this.started = false
-    this.updateHeld(false)
-    this.fnMonitor.stop()
+    ++this.lifecycle
+    this.cancelRecovery()
+    this.resetHeld('app shutdown')
+    void this.fnMonitor.stop()
     this.stopStandardShortcut()
     this.suspended = false
   }
@@ -357,6 +476,8 @@ export class HotkeyService {
     const accelerator = hotkeyToAccelerator(this.shortcut)
     if (!accelerator) return false
     if (globalShortcut.isRegistered(accelerator)) return true
-    return globalShortcut.register(accelerator, this.options.onToggle)
+    return globalShortcut.register(accelerator, () => {
+      if (this.started && !this.sleeping) this.options.onToggle()
+    })
   }
 }

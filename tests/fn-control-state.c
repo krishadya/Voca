@@ -3,6 +3,16 @@
 #include "../native/fn-control-state.h"
 
 int main(void) {
+    // A modifier held over recovery must be released. Synthetic Command+C
+    // flags cannot clear this gate; a fresh physical chord is required.
+    VocaReleaseGate gate = {true, true, true};
+    assert(voca_wait_for_release(&gate, VOCA_OTHER_MODIFIER, false, false));
+    assert(gate.waiting);
+    assert(voca_wait_for_release(&gate, VOCA_FN, false, false));
+    assert(gate.waiting);
+    assert(voca_wait_for_release(&gate, VOCA_CONTROL, false, false));
+    assert(!gate.waiting);
+    assert(!voca_wait_for_release(&gate, VOCA_FN, true, false));
     VocaFnControlState s = {0};
     assert(voca_update_chord(&s, VOCA_FN, true, false, 1) == 0);
     assert(voca_update_chord(&s, VOCA_CONTROL, false, true, 2) == 1);

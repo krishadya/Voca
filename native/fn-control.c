@@ -10,6 +10,16 @@ static CFMachPortRef tap;
 static VocaFnControlState state = {0};
 static pid_t parent_pid;
 static bool diagnostics;
+static bool unavailable;
+static VocaReleaseGate release_gate = {0};
+
+static void invalidate_tap(void) {
+    if (unavailable) return;
+    unavailable = true;
+    state = (VocaFnControlState){0};
+    puts("unavailable");
+    CFRunLoopStop(CFRunLoopGetCurrent());
+}
 
 static void emit_transition(int transition) {
     if (transition == 1) puts("PTT_DOWN");
@@ -21,18 +31,20 @@ static CGEventRef handle_event(CGEventTapProxy proxy, CGEventType type,
     (void)proxy;
     (void)context;
     if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
-        if (diagnostics) puts("diagnostic tap-reset");
-        if (state.held) emit_transition(-1);
-        state = (VocaFnControlState){0};
-        CGEventTapEnable(tap, true);
+        if (diagnostics) puts("diagnostic tap-disabled");
+        invalidate_tap(); // Parent recreates the helper; never submit a partial clip.
         return event;
     }
     if (type != kCGEventFlagsChanged) return event;
+    if (unavailable) return event;
     CGKeyCode key = (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
     CGEventFlags flags = CGEventGetFlags(event);
     VocaModifier modifier = key == kVK_Function ? VOCA_FN :
         (key == kVK_Control || key == kVK_RightControl) ? VOCA_CONTROL : VOCA_OTHER_MODIFIER;
-    int transition = voca_update_chord(&state, modifier,
+    bool wait_for_release = voca_wait_for_release(&release_gate, modifier,
+        (flags & kCGEventFlagMaskSecondaryFn) != 0,
+        (flags & kCGEventFlagMaskControl) != 0);
+    int transition = wait_for_release ? 0 : voca_update_chord(&state, modifier,
         (flags & kCGEventFlagMaskSecondaryFn) != 0,
         (flags & kCGEventFlagMaskControl) != 0,
         CGEventGetTimestamp(event));
@@ -59,10 +71,11 @@ static CGEventRef handle_event(CGEventTapProxy proxy, CGEventType type,
 static void heartbeat(CFRunLoopTimerRef timer, void *context) {
     (void)timer;
     (void)context;
-    if (getppid() != parent_pid || !CGEventTapIsEnabled(tap)) {
+    if (getppid() != parent_pid) {
         CFRunLoopStop(CFRunLoopGetCurrent());
         return;
     }
+    if (!CGEventTapIsEnabled(tap)) { invalidate_tap(); return; }
     puts("alive");
 }
 
@@ -73,6 +86,12 @@ int main(int argc, char **argv) {
     tap = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
         kCGEventTapOptionListenOnly, CGEventMaskBit(kCGEventFlagsChanged), handle_event, NULL);
     if (!tap) return 1;
+    // Keys held across sleep/startup must be released before a fresh chord.
+    CGEventFlags physical = CGEventSourceFlagsState(kCGEventSourceStateHIDSystemState);
+    release_gate.fn = (physical & kCGEventFlagMaskSecondaryFn) != 0;
+    release_gate.control = (physical & kCGEventFlagMaskControl) != 0;
+    release_gate.waiting = release_gate.fn || release_gate.control;
+    if (diagnostics && release_gate.waiting) puts("diagnostic startup-waiting-for-modifier-release");
     CFRunLoopSourceRef source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0);
     if (!source) { CFRelease(tap); return 1; }
     CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);
@@ -83,7 +102,7 @@ int main(int argc, char **argv) {
     CFRunLoopAddTimer(CFRunLoopGetCurrent(), timer, kCFRunLoopCommonModes);
     puts("ready");
     CFRunLoopRun();
-    if (state.held) emit_transition(-1);
+    state = (VocaFnControlState){0};
     CFRelease(timer);
     CFRelease(source);
     CFRelease(tap);
